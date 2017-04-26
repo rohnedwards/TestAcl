@@ -64,13 +64,21 @@ function Test-Acl {
     }
 }
 
+$GenericRightsDef = @{
+    GenericRead = -2147483648
+    GenericWrite = 1073741824
+    GenericExecute = 536870912
+    GenericAll = 268435456
+}
+
 function AddAce {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory, ValueFromPipeline)]
         [System.Security.AccessControl.CommonSecurityDescriptor] $SecurityDescriptor,
         [Parameter(Mandatory, Position=0)]
-        [System.Security.AccessControl.CommonAce] $Ace
+        [System.Security.AccessControl.CommonAce] $Ace,
+        [switch] $NoGenericRightsTranslation
     )
 
     begin {
@@ -82,11 +90,26 @@ function AddAce {
             [CmdletBinding()]
             param(
                 [int] $AccessMask,
-                [System.Collections.IDictionary] $GenericRights
+                [System.Collections.IDictionary] $GenericRightsDict
             )
             
-            if ($null -ne $GenericRights) {
-
+            #if ($null -ne ($GenericRightsDict = $SecurityDescriptor.__GenericRights) -and -not $NoGenericRightsTranslation) {
+            if ($null -ne $GenericRightsDict) {
+                # Check for presence of generic rights, and replace them based on what the dictionary says
+               foreach ($GenRight in $GenericRightsDef.Keys) {
+                   Write-Verbose "Working on ${GenRight}"
+                   if (-not $GenericRightsDict.Contains($GenRight)) {
+                       Write-Verbose "  ...not present in GenericRightsDict, so skipping"
+                       continue
+                   }
+                   $Value = $GenericRightsDef[$GenRight]
+                   if (($AccessMask -band $Value) -eq $Value) {
+                       Write-Verbose "  ...old mask = ${AccessMask}"
+                       $AccessMask = $AccessMask -bxor $Value  # Turn that bit off
+                       $AccessMask = $AccessMask -bor $GenericRightsDict[$GenRight]
+                       Write-Verbose "  ...new mask = ${AccessMask}"
+                   }
+               }
             }
 
             return $AccessMask
@@ -110,6 +133,12 @@ function AddAce {
     }
 
     process {
+        $GenericRightsDict = if ($NoGenericRightsTranslation) { 
+            $null
+        }
+        else {
+            $SecurityDescriptor.__GenericRightsDict
+        }
         if ($Ace.AuditFlags -eq [System.Security.AccessControl.AuditFlags]::None) {
             # This is an access ACE
             $SecurityDescriptor.DiscretionaryAcl.AddAccess(
@@ -148,6 +177,12 @@ function NewCommonSecurityDescriptor {
 
             { $_ -in 'System.IO.FileInfo', 'System.IO.DirectoryInfo' } {
                 $Sddl = $InputObject | Get-Acl -Audit:$Audit | Select-Object -ExpandProperty Sddl
+                $GenericRightsDict = @{
+                    GenericRead = [System.Security.AccessControl.FileSystemRights] 'Read, Synchronize'
+                    GenericWrite = [System.Security.AccessControl.FileSystemRights] 'Write, ReadPermissions, Synchronize'
+                    GenericExecute = [System.Security.AccessControl.FileSystemRights] 'ExecuteFile, ReadAttributes, ReadPermissions, Synchronize'
+                    GenericAll = [System.Security.AccessControl.FileSystemRights] 'FullControl'
+                }
             }
 
             System.IO.DirectoryInfo {
@@ -163,6 +198,11 @@ function NewCommonSecurityDescriptor {
         # If we've made it here, we have enough information to create a security descriptor
         $ReferenceSD = New-Object System.Security.AccessControl.CommonSecurityDescriptor $IsContainer, $IsDs, $Sddl
         $NewSD = New-Object System.Security.AccessControl.CommonSecurityDescriptor $IsContainer, $IsDs, 'D:S:'
+
+        # Tuck the generic rights dictionary inside the SD object (AddAce and RemoveAce will know what to do with it)
+        $NewSD | Add-Member -NotePropertyMembers @{
+            __GenericRightsDict = $GenericRightsDict
+        }
 
         foreach ($Ace in $ReferenceSD.DiscretionaryAcl) {
             $NewSD | AddAce $Ace
