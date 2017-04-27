@@ -161,6 +161,71 @@ function AddAce {
         }
     }
 }
+
+function ConvertToAce {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory, ValueFromPipeline)]
+        $InputObject
+    )
+
+    process {
+        
+        [System.Security.AccessControl.AceFlags] $AceFlags = [System.Security.AccessControl.AceFlags]::None   
+        $AccessMask = 0
+        $AceQualifier = $Sid = $null
+
+        switch ($InputObject.GetType()) {
+            { $InputObject -is [System.Security.AccessControl.AccessRule] } {
+                if ($InputObject.InheritanceFlags -band [System.Security.AccessControl.InheritanceFlags]::ContainerInherit) {
+                    $AceFlags = $AceFlags.value__ -bor [System.Security.AccessControl.AceFlags]::ContainerInherit.value__
+                }
+                if ($InputObject.InheritanceFlags -band [System.Security.AccessControl.InheritanceFlags]::ObjectInherit) {
+                    $AceFlags = $AceFlags.value__ -bor [System.Security.AccessControl.AceFlags]::ObjectInherit.value__
+                }
+            
+                if ($InputObject.PropagationFlags -band [System.Security.AccessControl.PropagationFlags]::InheritOnly) {
+                    $AceFlags = $AceFlags.value__ -bor [System.Security.AccessControl.AceFlags]::InheritOnly.value__
+                }
+                if ($InputObject.PropagationFlags -band [System.Security.AccessControl.PropagationFlags]::NoPropagateInherit) {
+                    $AceFlags = $AceFlags.value__ -bor [System.Security.AccessControl.AceFlags]::NoPropagateInherit.value__
+                }
+
+                $AccessMask = $InputObject.GetType().GetProperty('AccessMask', [System.Reflection.BindingFlags] 'NonPublic, Instance').GetValue($InputObject)
+
+                $AceQualifier = if ($InputObject.AccessControlType -eq 'Allow') {
+                    [System.Security.AccessControl.AceQualifier]::AccessAllowed
+                }
+                else {
+                    [System.Security.AccessControl.AceQualifier]::AccessDenied
+                }
+
+                try {
+                    $Sid = $InputObject.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier])
+                }
+                catch {
+                    Write-Error "Error getting SID: ${_}"
+                    return
+                }
+            }
+
+            default {
+                Write-Error "Unsupported type: ${_}"
+                return
+            }
+        }
+    
+        New-Object System.Security.AccessControl.CommonAce (
+            $AceFlags,
+            $AceQualifier,
+            $AccessMask,
+            $Sid,
+            $false,
+            $null
+        )
+    }
+}
+
 function NewCommonSecurityDescriptor {
     [CmdletBinding()]
     param(
