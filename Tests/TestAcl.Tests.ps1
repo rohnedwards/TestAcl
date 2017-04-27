@@ -76,7 +76,16 @@ Describe 'Test-Acl' {
         }
 
         It 'Works with -RequiredAces FileSystemAccessRule[]' {
-            Get-Item C:\Windows | Test-Acl -RequiredAces [FileSystemAccessRule]::new('CREATOR OWNER', 268435456, 'ObjectInherit, ContainerInherit', 'InheritOnly', 'Allow'), [FileSystemAccessRule]::new('Users', 'ReadAndExecute', 'None', 'None', 'Allow') | Should Be $true
+            # THIS ISN'T WORKING RIGHT NOW. LOOKS LIKE THE MOCKING IS MESSING WITH THE CALL TO TEST-ACL AND THE TRANSFORM ON COMMONACE
+            $ReqAces = [System.Security.AccessControl.FileSystemAccessRule]::new('SYSTEM', 'Modify', 'ObjectInherit, ContainerInherit', 'InheritOnly', 'Allow'), 
+                       [System.Security.AccessControl.FileSystemAccessRule]::new('Users', 'ReadAndExecute', 'None', 'None', 'Allow')
+            Get-Item C:\Windows | Test-Acl -RequiredAces $ReqAces | Should Be $true
         }
+    }
+    It 'Works with -RequiredAces FileSystemAccessRule[]' {
+        # THIS ISN'T WORKING RIGHT NOW. LOOKS LIKE THE MOCKING IS MESSING WITH THE CALL TO TEST-ACL AND THE TRANSFORM ON COMMONACE
+        $ReqAces = [System.Security.AccessControl.FileSystemAccessRule]::new('SYSTEM', 'Modify', 'ObjectInherit, ContainerInherit', 'InheritOnly', 'Allow'), 
+                    [System.Security.AccessControl.FileSystemAccessRule]::new('Users', 'ReadAndExecute', 'None', 'None', 'Allow')
+        Get-Item C:\Windows | Test-Acl -RequiredAces $ReqAces | Should Be $true
     }
 }

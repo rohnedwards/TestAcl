@@ -15,11 +15,17 @@ function Test-Acl {
         # is provided, then the security descriptor CANNOT contain any ACEs except what's
         # provided in the -AllowedAces collection. The collection can contain ACEs that
         # aren't present in the security descriptor, however.
+        [Roe.TransformScript({
+            $_ | ConvertToAce
+        })]
         [System.Security.AccessControl.CommonAce[]] $AllowedAces,
         [Parameter()]
         # A list of ACEs that MUST be present in the security descriptor. The security
         # descriptor is still allowed to contain ACEs that aren't listed in the
         # -RequiredAces collection. 
+        [Roe.TransformScript({
+            $_ | ConvertToAce
+        })]
         [System.Security.AccessControl.CommonAce[]] $RequiredAces,
         # By default, ACEs aren't required to match the -AllowedAces or -RequiredAces
         # exactly, i.e., the AccessMask and/or InheritanceFlags can differ as long as 
@@ -170,7 +176,7 @@ function ConvertToAce {
     )
 
     process {
-        
+
         [System.Security.AccessControl.AceFlags] $AceFlags = [System.Security.AccessControl.AceFlags]::None   
         $AccessMask = 0
         $AceQualifier = $Sid = $null
@@ -280,3 +286,41 @@ function NewCommonSecurityDescriptor {
         return $NewSD
     }
 }
+
+Add-Type @'
+    using System.Collections;    // Needed for IList
+    using System.Management.Automation;
+    using System.Collections.Generic;
+    namespace Roe {
+        public sealed class TransformScriptAttribute : ArgumentTransformationAttribute {
+            string _transformScript;
+            public TransformScriptAttribute(string transformScript) {
+                _transformScript = string.Format(@"
+                    # Assign $_ variable
+                    $_ = $args[0]
+ 
+                    # The return value of this needs to match the C# return type so no coercion happens
+                    $FinalResult = New-Object System.Collections.ObjectModel.Collection[psobject]
+                    $ScriptResult = {0}
+ 
+                    # Add the result and output the collection
+                    $FinalResult.Add((,$ScriptResult))
+                    $FinalResult", transformScript);
+            }
+ 
+            public override object Transform(EngineIntrinsics engineIntrinsics, object inputData) {
+                var results = engineIntrinsics.InvokeCommand.InvokeScript(
+                    _transformScript,
+                    true,   // Run in its own scope
+                    System.Management.Automation.Runspaces.PipelineResultTypes.None,  // Just return as PSObject collection
+                    null,
+                    inputData
+                );
+                if (results.Count > 0) {
+                    return results[0].ImmediateBaseObject;
+                }
+                return inputData;  // No transformation
+            }
+        }
+    }
+'@
