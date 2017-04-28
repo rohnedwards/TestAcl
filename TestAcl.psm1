@@ -182,6 +182,130 @@ function ConvertToAce {
         $AceQualifier = $Sid = $null
 
         switch ($InputObject.GetType()) {
+
+            ([String]) {
+                <#
+                    Takes this form:
+                    [Allow|Deny|Audit (S[uccess]|F[ailure])] 'Principal' Rights1, Rights2 [Object, ChildContainers, ChildObjects]
+
+                    We're going to use the PS AST parser to split the string.
+                #>
+                $Tokens = $ParseErrors = $null
+                $Ast = [System.Management.Automation.Language.Parser]::ParseInput($InputObject, [ref] $Tokens, [ref] $ParseErrors)
+                $Nodes = $Ast.FindAll({ $args[0].Parent -is [System.Management.Automation.Language.CommandAst]}, $false)
+            $global:__Nodes = $Nodes
+                for ($i = 0; $i -lt $Nodes.Count; $i++) {
+
+                    $CurrentNodeText = switch ($Nodes[$i].StaticType) {
+
+                        string {
+                            # This should handle bare words and quoted strings
+                            $Nodes[$i].Value
+                        }
+
+                        System.Object[] {
+                            $Nodes[$i].Elements.Extent.Text
+                        }
+
+                        default {
+                            Write-Warning "Unhandled Node StaticType: ${_}"
+                            $Nodes[$i].Extent.Text
+                        }
+                    }
+                    if ($null -eq $AceQualifier) {
+                        # AceQualifier is optional, so check to see what the first node is:
+                        $AceQualifier = if ($CurrentNodeText -match '^(?<type>Allow|Deny|Audit)$') {
+                            switch ($matches.type) {
+                                Allow { [System.Security.AccessControl.AceQualifier]::AccessAllowed }
+                                Deny { [System.Security.AccessControl.AceQualifier]::AccessDenied }
+                                default { [System.Security.AccessControl.AceQualifier]::SystemAudit }
+                            }
+                        }
+                        else {
+                            [System.Security.AccessControl.AceQualifier]::AccessAllowed
+                        }
+                    }
+                    elseif ('SystemAudit' -eq $AceQualifier -and ([System.Security.AccessControl.AceFlags]::AuditFlags.value__ -band $AceFlags.value__) -eq 0) {
+                        # At this point, Success, Failure (or SF) are not optional. This node must contain
+                        # information about it
+                        if ($CurrentNodeText -match '^(?<success>S(uccess)?)?(\s*\,\s*)?(?<failure>F(ailure)?)?$') {
+                            if ($matches.success) {
+                                $AceFlags = $AceFlags.value__ -bor [System.Security.AccessControl.AceFlags]::SuccessfulAccess
+                            }
+                            if ($matches.failure) {
+                                $AceFlags = $AceFlags.value__ -bor [System.Security.AccessControl.AceFlags]::FailedAccess
+                            }
+                        }
+                        else {
+                            Write-Error "Unable to determine audit flags from '${CurrentNodeText}'"
+                            return
+                        }
+                    }
+                    elseif ($null -eq $Sid) {
+                        # Time to figure out the principal that the ACE should apply to
+                        # First, see if we can cast the string to an NTAccount and Translate() to a SID:
+                        $SID = try {
+                            ([System.Security.Principal.NTAccount] $CurrentNodeText).Translate([System.Security.Principal.SecurityIdentifier])
+                        }
+                        catch {
+                            # That didn't work. Was this maybe a SID?
+                            if ($CurrentNodeText -match '^\*?(S-.*)$') {
+                                $matches[1] -as [System.Security.Principal.SecurityIdentifier]
+                            }
+                        }
+
+                        # Final test that something is in SID:
+                        if ($null -eq $SID) {
+                            Write-Error "Unable to determine SID from '${CurrentNodeText}'"
+                            return
+                        }
+                    }
+                    elseif (0 -eq $AccessMask) {
+                        # Figure out the AccessMask. First, is this numeric?
+                        if ($CurrentNodeText -as [int]) {
+                            $AccessMask = $CurrentNodeText
+                            continue
+                        }
+                        
+                        # Next, check to see if an enum type helper was specified
+                        $PotentialEnumTypes = [System.Security.AccessControl.FileSystemRights], [System.Security.AccessControl.RegistryRights], [System.DirectoryServices.ActiveDirectoryRights]
+                        if ($CurrentNodeText[0] -match '^(?<type>[^\:]+)\:(?<therest>.*)') {
+                            $Type = $matches.type
+                            Write-Warning "Type searching doesn't work right now!!"
+                            
+                            $CurrentNodeText[0] = $matches.therest
+                        }
+
+                        foreach ($CurrentType in $PotentialEnumTypes) {
+                            if (($AccessMask = $CurrentNodeText -as $CurrentType)) {
+                                break    
+                            }
+                        }
+
+                        if ([int] $AccessMask -eq 0) {
+                            Write-Error "Unable to determine access mask from '${CurrentNodeText}'"
+                            return
+                        }
+                    }
+                    elseif (($AceFlags.value__ -band [System.Security.AccessControl.AceFlags]::InheritanceFlags) -eq 0) {
+                        if (($AppliesTo = $CurrentNodeText -as [Roe.AppliesTo])) {
+                            # Need to make one change. If 'Object' or equivalent is set, we need to take it out of the set bits, and if it's not set, we need to set it. So we're just going to toggle numeric 8
+                            $AceFlags = $AceFlags.value__ -bor ($AppliesTo.value__ -bxor 8)
+                        }
+                        else {
+                            Write-Error "Unknown ACE flags: ${CurrentNodeText}"
+                            return
+                        }
+                    }
+
+                }
+
+                # Test to see if any inheritance and propagation flags have been set (remember, they were optional). If not, set them for O CC CO
+                if (($AceFlags.value__ -band [System.Security.AccessControl.AceFlags]::InheritanceFlags) -eq 0) {
+                    $AceFlags = $AceFlags.value__ -bor ([System.Security.AccessControl.AceFlags] 'ObjectInherit, ContainerInherit').value__
+                }
+            }
+
             { $InputObject -is [System.Security.AccessControl.AccessRule] } {
                 if ($InputObject.InheritanceFlags -band [System.Security.AccessControl.InheritanceFlags]::ContainerInherit) {
                     $AceFlags = $AceFlags.value__ -bor [System.Security.AccessControl.AceFlags]::ContainerInherit.value__
@@ -286,6 +410,28 @@ function NewCommonSecurityDescriptor {
         return $NewSD
     }
 }
+
+Add-Type @'
+    using System;
+    namespace Roe {
+        [Flags()]
+        public enum AppliesTo {
+            ChildObjects = 1,
+            CO = 1,
+            Files = 1,
+            ChildContainers = 2,
+            CC = 2,
+            SubFolders = 2,
+            ChildKeys = 2,
+            Object = 8,
+            ThisFile = 8,
+            ThisFolder = 8,
+            ThisKey = 8,
+            This = 8,
+            O = 8
+        }
+    }
+'@
 
 Add-Type @'
     using System.Collections;    // Needed for IList
