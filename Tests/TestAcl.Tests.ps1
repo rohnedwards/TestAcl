@@ -142,13 +142,13 @@ Describe 'Convert ACEs' {
         # Notice the reverse direction:
         [System.Security.Principal.SecurityIdentifier] 'S-1-15-2-1' | % Translate ([System.Security.Principal.NTAccount])
         #>
-        'Audit S "APPLICATION PACKAGE AUTHORITY\ALL APPLICATION PACKAGES" ReadKey' | ConvertToAce | Should Be ([System.Security.AccessControl.RegistryAuditRule]::new(
+        'Audit S "APPLICATION PACKAGE AUTHORITY\ALL APPLICATION PACKAGES" ReadKey' | ConvertToAce | Should Be (([System.Security.AccessControl.RegistryAuditRule]::new(
             'ALL APPLICATION PACKAGES',
             'ReadKey',
             'ObjectInherit, ContainerInherit',
             'None',
             'Success'
-        ))
+        )) | ConvertToAce)
     }
 }
 
@@ -156,6 +156,17 @@ Describe 'Test-Acl' {
     
     It 'Works with FileInfo and DirectoryInfo objects' {
         { Get-Item C:\Windows | Test-Acl -ErrorAction Stop } | Should Not Throw
+    }
+
+    Context '-AllowedAces' {
+        $SD = Get-Acl C:\Windows
+        It 'Passes with SD is played back' {
+            Get-Item C:\Windows | Test-Acl -AllowedAces $SD.Access | Should Be $true
+        }
+
+        It 'Fails with SD -1 is played back' {
+            Get-Item C:\Windows | Test-Acl -AllowedAces ($SD.Access | select -skip 1) |  Should Be $false
+        }
     }
     It 'RequiredTest' {
         Get-Item C:\Windows | Test-Acl -RequiredAces '

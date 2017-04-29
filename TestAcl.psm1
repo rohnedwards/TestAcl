@@ -1,6 +1,46 @@
 
 function Test-Acl {
+<#
+.SYNOPSIS
+Test if a security descriptor contains allowed and/or required access control entries.
 
+.DESCRIPTION
+Verifying access control entries (ACEs) that a security descriptor (SD) contains can be a very complicated
+process, especially considering all of the different types of securable objects in Windows.
+
+Test-Acl attempts to simplify this process. After providing an -InputObject, which can be either the
+securable object, e.g., file, folder, registry key, or a security descriptor object itself, you also provide
+an -AllowedAces value and/or a -RequiredAces value. 
+
+The -AllowedAces can be thought of as a whitelist: any
+access that these ACEs grant are allowed to be present in the SD, even if they don't match exactly. For example,
+you can specify that an ACE granting Users 'Read, Write' to a folder, subfolders, and files is allowed, but the
+SD you're testing may only grant Users 'Read' to subfolders. This less-permissive ACE would not cause the test 
+(to fail well, unless the -ExactMatch switch is also specified). If, however, the SD had an ACE granting Users
+'Read, Delete', the test would fail because 'Delete' isn't contained in the -AllowedAces.
+
+The -AllowedAces string formats can also contain wildcards for principals. This is useful for when you want to
+allow certain rights to be allowed, even when you don't know what principals they may be granted to. For example,
+maybe you're only looking for objects where users have more than Read access. Specifying the following in the
+-AllowedAces would take care of that: Allow * Read
+
+The -RequiredAces is a list of ACEs that MUST be specified. If more access/audit rights (or inheritance flags)
+are granted, that's OK. For example, assume you specify the following -RequireAces list:
+
+Allow Users Read SubFolders
+Deny Guests Write
+
+With those ACEs specified, that means an SD must have AT LEAST those rights specified. If the SD has an ACE that
+grants Users 'FullControl' for the folder, subfolers, and files, that would be fine since it contains the required
+rights. If there was a Deny ACE that denied more than 'Write' to guests, that would be fine as long as it applied
+to the folder, subfolders, and files (since no inheritance/propagation information was specified, it defaults to
+applying to all)
+
+No wildcards are allowed for -RequiredAces.
+
+.NOTES
+
+#>
     [OutputType([bool])]
     [CmdletBinding()]
     param(
@@ -57,6 +97,12 @@ function Test-Acl {
         # Sddl form again. If the SD already effectively contained that ACE, the
         # Sddl form should be unchanged. If we detect a change, we know that the
         # function should exit with a failure.
+        #
+        # Eventually, we can allow a switch that will still walk through the
+        # ACEs, even after a failure is detected. We'd need to reset the SD after
+        # each failure, though. This would be useful for validation, though, so
+        # instead of just getting a 'This failed' message, you could provide more
+        # information about WHY it failed
         $StartingSddlForm = $SD.GetSddlForm('All')
         foreach ($ReqAce in $RequiredAces) {
             $SD | AddAce $ReqAce
@@ -65,6 +111,27 @@ function Test-Acl {
             }
         }
 
+        $AllowedAccessAcesSpecified = $AllowedAuditAcesSpecified = $false
+        foreach ($AllowedAce in $AllowedAces) {
+            if ($AllowedAces.AceQualifier -in [System.Security.AccessControl.AceQualifier]::AccessAllowed, [System.Security.AccessControl.AceQualifier]::AccessDenied) {
+                $AllowedAccessAcesSpecified = $true
+            }
+            elseif ($AllowedAces.AceQualifier -eq [System.Security.AccessControl.AceQualifier]::SystemAudit) {
+                $AllowedAuditAcesSpecified = $true
+            }
+            
+            $SD | RemoveAce $AllowedAce
+        }
+$global:__sd = $SD
+        if ($AllowedAccessAcesSpecified -and $SD.DiscretionaryAcl.Count -gt 0) {
+            Write-Verbose "  -> DACL still contains entries, so there must have been some access not specified in -AllowedAces present"
+            return $false
+        }
+
+        if ($AllowedAuditAcesSpecified) {
+            throw "Audit ACEs aren't allowed yet!"
+        }
+        
         # If we made it this far, we passed the test!
         return $true
     }
@@ -77,6 +144,55 @@ $GenericRightsDef = @{
     GenericAll = 268435456
 }
 
+function ToAccessMask {
+    <#
+        Helper function that helps convert any generic rights present
+        into object-specific rights
+    #>
+    [CmdletBinding()]
+    param(
+        [int] $AccessMask,
+        [System.Collections.IDictionary] $GenericRightsDict
+    )
+    
+    #if ($null -ne ($GenericRightsDict = $SecurityDescriptor.__GenericRights) -and -not $NoGenericRightsTranslation) {
+    if ($null -ne $GenericRightsDict) {
+        # Check for presence of generic rights, and replace them based on what the dictionary says
+        foreach ($GenRight in $GenericRightsDef.Keys) {
+            Write-Verbose "Working on ${GenRight}"
+            if (-not $GenericRightsDict.Contains($GenRight)) {
+                Write-Verbose "  ...not present in GenericRightsDict, so skipping"
+                continue
+            }
+            $Value = $GenericRightsDef[$GenRight]
+            if (($AccessMask -band $Value) -eq $Value) {
+                Write-Verbose "  ...old mask = ${AccessMask}"
+                $AccessMask = $AccessMask -bxor $Value  # Turn that bit off
+                $AccessMask = $AccessMask -bor $GenericRightsDict[$GenRight]
+                Write-Verbose "  ...new mask = ${AccessMask}"
+            }
+        }
+    }
+
+    return $AccessMask
+}
+
+function ToAccessType {
+    [CmdletBinding()]
+    param(
+        [System.Security.AccessControl.AceQualifier] $AceQualifier
+    )
+
+    switch ($AceQualifier) {
+
+        AccessAllowed { [System.Security.AccessControl.AccessControlType]::Allow }                
+        AccessDenied { [System.Security.AccessControl.AccessControlType]::Deny }
+        default {
+            throw "Unsupported AceQualifier: ${_}"
+        }
+    }
+}
+
 function AddAce {
     [CmdletBinding()]
     param(
@@ -86,57 +202,6 @@ function AddAce {
         [System.Security.AccessControl.CommonAce] $Ace,
         [switch] $NoGenericRightsTranslation
     )
-
-    begin {
-        function ToAccessMask {
-            <#
-                Helper function that helps convert any generic rights present
-                into object-specific rights
-            #>
-            [CmdletBinding()]
-            param(
-                [int] $AccessMask,
-                [System.Collections.IDictionary] $GenericRightsDict
-            )
-            
-            #if ($null -ne ($GenericRightsDict = $SecurityDescriptor.__GenericRights) -and -not $NoGenericRightsTranslation) {
-            if ($null -ne $GenericRightsDict) {
-                # Check for presence of generic rights, and replace them based on what the dictionary says
-               foreach ($GenRight in $GenericRightsDef.Keys) {
-                   Write-Verbose "Working on ${GenRight}"
-                   if (-not $GenericRightsDict.Contains($GenRight)) {
-                       Write-Verbose "  ...not present in GenericRightsDict, so skipping"
-                       continue
-                   }
-                   $Value = $GenericRightsDef[$GenRight]
-                   if (($AccessMask -band $Value) -eq $Value) {
-                       Write-Verbose "  ...old mask = ${AccessMask}"
-                       $AccessMask = $AccessMask -bxor $Value  # Turn that bit off
-                       $AccessMask = $AccessMask -bor $GenericRightsDict[$GenRight]
-                       Write-Verbose "  ...new mask = ${AccessMask}"
-                   }
-               }
-            }
-
-            return $AccessMask
-        }
-
-        function ToAccessType {
-            [CmdletBinding()]
-            param(
-                [System.Security.AccessControl.AceQualifier] $AceQualifier
-            )
-
-            switch ($AceQualifier) {
-
-                AccessAllowed { [System.Security.AccessControl.AccessControlType]::Allow }                
-                AccessDenied { [System.Security.AccessControl.AccessControlType]::Deny }
-                default {
-                    throw "Unsupported AceQualifier: ${_}"
-                }
-            }
-        }
-    }
 
     process {
         $GenericRightsDict = if ($NoGenericRightsTranslation) { 
@@ -164,6 +229,47 @@ function AddAce {
                 $Ace.InheritanceFlags,
                 $Ace.PropagationFlags
             )
+        }
+    }
+}
+
+function RemoveAce {
+
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory, ValueFromPipeline)]
+        [System.Security.AccessControl.CommonSecurityDescriptor] $SecurityDescriptor,
+        [Parameter(Mandatory, Position=0)]
+        [System.Security.AccessControl.CommonAce] $Ace,
+        [switch] $NoGenericRightsTranslation
+    )
+
+    process {
+        $GenericRightsDict = if ($NoGenericRightsTranslation) { 
+            $null
+        }
+        else {
+            $SecurityDescriptor.__GenericRightsDict
+        }
+        if ($Ace.AuditFlags -eq [System.Security.AccessControl.AuditFlags]::None) {
+            # This is an access ACE
+            $SecurityDescriptor.DiscretionaryAcl.RemoveAccess(
+                (ToAccessType $Ace.AceQualifier),
+                $Ace.SecurityIdentifier,
+                (ToAccessMask $Ace.AccessMask -GenericRights $GenericRightsDict),
+                $Ace.InheritanceFlags,
+                $Ace.PropagationFlags
+            ) | Out-Null
+        }
+        else {
+            # This is an audit ACE
+            $SecurityDescriptor.SystemAcl.RemoveAudit(
+                $Ace.AuditFlags,
+                $Ace.SecurityIdentifier,
+                (ToAccessMask $Ace.AccessMask -GenericRights $GenericRightsDict),
+                $Ace.InheritanceFlags,
+                $Ace.PropagationFlags
+            ) | Out-Null
         }
     }
 }
@@ -232,7 +338,7 @@ function ConvertToSid {
             Write-Verbose "  -> NTAccount to SID translation failed. Trying to cast to SID"
             if ($InputObject -match '^\*?(S-.*)$') {
                 $matches[1] -as [System.Security.Principal.SecurityIdentifier]
-            } 
+            }
         }
 
         # Final test that something is in SID:
