@@ -204,6 +204,7 @@ function ConvertToAce {
         [System.Security.AccessControl.AceFlags] $AceFlags = [System.Security.AccessControl.AceFlags]::None   
         $AccessMask = 0
         $AceQualifier = $Sid = $null
+        $AceFlagsDefined = $false
 
         switch ($InputObject.GetType()) {
 
@@ -327,8 +328,10 @@ function ConvertToAce {
                         }
 
                         if (($AppliesTo = $CurrentNodeText -as [Roe.AppliesTo])) {
-                            # Need to make one change. If 'Object' or equivalent is set, we need to take it out of the set bits, and if it's not set, we need to set it. So we're just going to toggle numeric 8
+                            $AceFlagsDefined = $true
                             Write-Verbose "    -> valid AceFlags found; before AceFlags: ${AceFlags}"
+
+                            # Need to make one change. If 'Object' or equivalent is set, we need to take it out of the set bits, and if it's not set, we need to set it. So we're just going to toggle numeric 8
                             $AceFlags = $AceFlags.value__ -bor ($AppliesTo.value__ -bxor 8)
                             Write-Verbose "    -> after AceFlags: ${AceFlags}"
                         }
@@ -345,7 +348,7 @@ function ConvertToAce {
                 }
 
                 # Test to see if any inheritance and propagation flags have been set (remember, they were optional). If not, set them for O CC CO
-                if (($AceFlags.value__ -band [System.Security.AccessControl.AceFlags]::InheritanceFlags) -eq 0) {
+                if (-not $AceFlagsDefined) {
                     $AceFlags = $AceFlags.value__ -bor ([System.Security.AccessControl.AceFlags] 'ObjectInherit, ContainerInherit').value__
                 }
             }

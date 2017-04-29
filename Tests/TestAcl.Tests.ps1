@@ -60,6 +60,29 @@ Describe 'Convert ACEs' {
         It '<string>' @Params
     }
 
+    Context 'String -> Allow ACE [Allow ''Network Service'' Read AppliesTo Object]'  {
+        $Params = @{
+            TestCases = @{ String = 'Allow ''Network Service'' Read to Object' },
+                @{String = '"Network Service" Read O' },
+                @{String = 'Network` Service Read appliesto ThisFolder' },
+                @{String = 'Allow *S-1-5-20 Read ThisFile' },
+                @{String = 'S-1-5-20 Read applies to Object'  }
+            Test = {
+                param(
+                    [string] $String
+                )
+                $String | ConvertToAce | Should Be ([System.Security.AccessControl.CommonAce]::new(
+                    'None',
+                    [System.Security.AccessControl.AceQualifier]::AccessAllowed,
+                    [System.Security.AccessControl.FileSystemRights] 'Read',
+                    ([System.Security.Principal.NTAccount] 'Network Service').Translate([System.Security.Principal.SecurityIdentifier]),
+                    $false,
+                    $null
+                ))
+            }
+        }
+        It '<string>' @Params
+    }
     Context 'String -> Deny ACE [Deny Everyone Read, Write, Delete AppliesTo Folder, SubFolders, and Files]'  {
         $Params = @{
             TestCases = @{ String = 'Deny Everyone Read and Write and Delete to Object, ChildContainers, and ChildObjects' },
@@ -99,6 +122,12 @@ Describe 'Test-Acl' {
     
     It 'Works with FileInfo and DirectoryInfo objects' {
         { Get-Item C:\Windows | Test-Acl -ErrorAction Stop } | Should Not Throw
+    }
+    It 'RequiredTest' {
+        Get-Item C:\Windows | Test-Acl -RequiredAces '
+             "NT SERVICE\TrustedInstaller" FullControl Object
+             Users ReadAndExecute, Synchronize Object   # This Synchronize shouldnt be necessary
+        '
     }
     It 'Works with RegistryKey objects' {
         { Get-Item HKLM:\SOFTWARE | Test-Acl -ErrorAction Stop } | Should Not Throw
