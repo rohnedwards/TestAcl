@@ -168,6 +168,30 @@ function AddAce {
     }
 }
 
+function AstToObj {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [System.Management.Automation.Language.ExpressionAst] $Ast
+    )    
+    
+    switch ($Ast.StaticType) {
+        
+        string {
+            # This should handle bare words and quoted strings
+            $Ast.Value
+        }
+
+        System.Object[] {
+            $Ast.Elements.Extent.Text
+        }
+
+        default {
+            Write-Warning "Unhandled Node StaticType: ${_}"
+            $Ast.Extent.Text
+        }
+    }
+}
 function ConvertToAce {
     [CmdletBinding()]
     param(
@@ -184,6 +208,16 @@ function ConvertToAce {
         switch ($InputObject.GetType()) {
 
             ([String]) {
+                Write-Verbose "Original String: ${InputObject}"
+                
+                # Really want to remove ability to have 'and' in the string. To prevent having to peek at the next node, doing a
+                # find on any 'and's that don't have a leading comma, and adding a comma. This makes it so we can always look for
+                # an 'and' in the $CurrentNodeText
+                $NewInputObject = $InputObject -replace '(?<!\,\s*)and', ', and'
+                if ($InputObject -ne $NewInputObject) {
+                    $InputObject = $NewInputObject
+                    Write-Verbose "  Modified string: ${InputObject}"
+                }
                 <#
                     Takes this form:
                     [Allow|Deny|Audit (S[uccess]|F[ailure])] 'Principal' Rights1, Rights2 [Object, ChildContainers, ChildObjects]
@@ -193,25 +227,21 @@ function ConvertToAce {
                 $Tokens = $ParseErrors = $null
                 $Ast = [System.Management.Automation.Language.Parser]::ParseInput($InputObject, [ref] $Tokens, [ref] $ParseErrors)
                 $Nodes = $Ast.FindAll({ $args[0].Parent -is [System.Management.Automation.Language.CommandAst]}, $false)
-            $global:__Nodes = $Nodes
+
                 for ($i = 0; $i -lt $Nodes.Count; $i++) {
 
-                    $CurrentNodeText = switch ($Nodes[$i].StaticType) {
+                    $CurrentNodeText = AstToObj $Nodes[$i]
+                    Write-Verbose "  CurrentNodeText: ${CurrentNodeText}"
 
-                        string {
-                            # This should handle bare words and quoted strings
-                            $Nodes[$i].Value
-                        }
-
-                        System.Object[] {
-                            $Nodes[$i].Elements.Extent.Text
-                        }
-
-                        default {
-                            Write-Warning "Unhandled Node StaticType: ${_}"
-                            $Nodes[$i].Extent.Text
-                        }
+                    # May remove this later, but 'and' is allowed; simply replace that element with the
+                    # next node (the way this is implemented, two ands together should result in an error):
+                    while ($CurrentNodeText[-1] -eq 'and') {
+                        Write-Verbose '    -> replacing ''and'' with next node'
+                        $CurrentNodeText[-1] = AstToObj $Nodes[++$i]
+                        $CurrentNodeText = $CurrentNodeText | ForEach-Object { $_ }
+                        Write-Verbose "    -> new CurrentNodeText: ${CurrentNodeText}"
                     }
+
                     if ($null -eq $AceQualifier) {
                         # AceQualifier is optional, so check to see what the first node is:
                         $AceQualifier = if ($CurrentNodeText -match '^(?<type>Allow|Deny|Audit)$') {
@@ -288,9 +318,22 @@ function ConvertToAce {
                         }
                     }
                     elseif (($AceFlags.value__ -band [System.Security.AccessControl.AceFlags]::InheritanceFlags) -eq 0) {
+                        
+                        Write-Verbose "    -> testing for AceFlags"
+                        # My first test case for a string version had a 'to' separating the rights and the AppliesTo. Now that
+                        # I'm implementing it, I'm not sure I like that idea, but let's put it in for now. Should we have a
+                        # check to make sure if the 'to' (or 'applies to' or 'appliesto') has inheritance and propagation flags
+                        # following it? Right now, you could do 'Everyone Modify to', and it would be valid...
+                        if ($CurrentNodeText -match '^(applies)?(to)?$') { 
+                            Write-Verbose '    -> ignoring'
+                            continue 
+                        }
+
                         if (($AppliesTo = $CurrentNodeText -as [Roe.AppliesTo])) {
                             # Need to make one change. If 'Object' or equivalent is set, we need to take it out of the set bits, and if it's not set, we need to set it. So we're just going to toggle numeric 8
+                            Write-Verbose "    -> valid AceFlags found; before AceFlags: ${AceFlags}"
                             $AceFlags = $AceFlags.value__ -bor ($AppliesTo.value__ -bxor 8)
+                            Write-Verbose "    -> after AceFlags: ${AceFlags}"
                         }
                         else {
                             Write-Error "Unknown ACE flags: ${CurrentNodeText}"
