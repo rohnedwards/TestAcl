@@ -209,6 +209,12 @@ function ConvertToAce {
         switch ($InputObject.GetType()) {
 
             ([String]) {
+                $InputObject = $InputObject -split '\s*\n\s*' | Where-Object { $_ }
+                if ($InputObject.Count -gt 1) {
+                    $InputObject | ConvertToAce
+                    return
+                }
+                
                 Write-Verbose "Original String: ${InputObject}"
                 
                 # Really want to remove ability to have 'and' in the string. To prevent having to peek at the next node, doing a
@@ -353,7 +359,7 @@ function ConvertToAce {
                 }
             }
 
-            { $InputObject -is [System.Security.AccessControl.AccessRule] } {
+            { $InputObject -is [System.Security.AccessControl.AuthorizationRule] } {
                 if ($InputObject.InheritanceFlags -band [System.Security.AccessControl.InheritanceFlags]::ContainerInherit) {
                     $AceFlags = $AceFlags.value__ -bor [System.Security.AccessControl.AceFlags]::ContainerInherit.value__
                 }
@@ -370,6 +376,16 @@ function ConvertToAce {
 
                 $AccessMask = $InputObject.GetType().GetProperty('AccessMask', [System.Reflection.BindingFlags] 'NonPublic, Instance').GetValue($InputObject)
 
+                try {
+                    $Sid = $InputObject.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier])
+                }
+                catch {
+                    Write-Error "Error getting SID: ${_}"
+                    return
+                }
+            }
+
+            { $InputObject -is [System.Security.AccessControl.AccessRule] } {
                 $AceQualifier = if ($InputObject.AccessControlType -eq 'Allow') {
                     [System.Security.AccessControl.AceQualifier]::AccessAllowed
                 }
@@ -377,12 +393,16 @@ function ConvertToAce {
                     [System.Security.AccessControl.AceQualifier]::AccessDenied
                 }
 
-                try {
-                    $Sid = $InputObject.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier])
+            }
+
+            { $InputObject -is [System.Security.AccessControl.AuditRule] } {
+                $AceQualifier = [System.Security.AccessControl.AceQualifier]::SystemAudit
+                
+                if ($InputObject.AuditFlags -band [System.Security.AccessControl.AuditFlags]::Success) {
+                    $AceFlags = $AceFlags.value__ -bor [System.Security.AccessControl.AceFlags]::SuccessfulAccess
                 }
-                catch {
-                    Write-Error "Error getting SID: ${_}"
-                    return
+                if ($InputObject.AuditFlags -band [System.Security.AccessControl.AuditFlags]::Failure) {
+                    $AceFlags = $AceFlags.value__ -bor [System.Security.AccessControl.AceFlags]::FailedAccess
                 }
             }
 

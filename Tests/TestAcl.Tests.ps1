@@ -107,6 +107,18 @@ Describe 'Convert ACEs' {
         It '<string>' @Params
     }
 
+    It 'Can take multi-line string' {
+        {
+        '
+             "NT SERVICE\TrustedInstaller" FullControl Object
+             Users ReadAndExecute, Synchronize Object   # This Synchronize shouldnt be necessary
+        ' | ConvertToAce -ErrorAction Stop -Verbose
+        } | Should Not Throw
+    }
+
+    It 'ReadAndExecute works (because it has ''and'' in it)' {
+        'Audit Success and Failure Everyone ReadAndExecute' | ConvertToAce | Should Be ([System.Security.AccessControl.FileSystemAuditRule]::new('Everyone', 'ReadAndExecute', 'ContainerInherit, ObjectInherit', 'None', 'Success, Failure') | ConvertToAce)
+    }
     It 'Works with FileSystemAccessRule' {
         [System.Security.AccessControl.FileSystemAccessRule]::new(
             'Everyone',
