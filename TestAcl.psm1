@@ -232,7 +232,7 @@ function ConvertToSid {
             Write-Verbose "  -> NTAccount to SID translation failed. Trying to cast to SID"
             if ($InputObject -match '^\*?(S-.*)$') {
                 $matches[1] -as [System.Security.Principal.SecurityIdentifier]
-            }
+            } 
         }
 
         # Final test that something is in SID:
