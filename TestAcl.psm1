@@ -220,7 +220,7 @@ function ConvertToAce {
                 # Really want to remove ability to have 'and' in the string. To prevent having to peek at the next node, doing a
                 # find on any 'and's that don't have a leading comma, and adding a comma. This makes it so we can always look for
                 # an 'and' in the $CurrentNodeText
-                $NewInputObject = $InputObject -replace '(?<!\,\s*)and', ', and'
+                $NewInputObject = $InputObject -replace '(?<!\,)\s+and', ', and'
                 if ($InputObject -ne $NewInputObject) {
                     $InputObject = $NewInputObject
                     Write-Verbose "  Modified string: ${InputObject}"
