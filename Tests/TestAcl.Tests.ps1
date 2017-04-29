@@ -128,6 +128,28 @@ Describe 'Convert ACEs' {
             'Allow'
         ) | ConvertToAce | Should Be $ReferenceAccessAce
     }
+
+    It 'ALL APPLICATION PACKAGES can be translated' {
+        <#
+        # The fully qualified name including 'APPLICATION PACKAGE AUTHORITY' fails the .NET SID translation. Had
+        # to make a helper function just for this guy (and maybe more in the future). Here's a demo of the failure:
+        # Fails
+        [System.Security.Principal.NTAccount] 'APPLICATION PACKAGE AUTHORITY\ALL APPLICATION PACKAGES' | % Translate ([System.Security.Principal.SecurityIdentifier])
+
+        # Works:
+        [System.Security.Principal.NTAccount] 'ALL APPLICATION PACKAGES' | % Translate ([System.Security.Principal.SecurityIdentifier])  
+
+        # Notice the reverse direction:
+        [System.Security.Principal.SecurityIdentifier] 'S-1-15-2-1' | % Translate ([System.Security.Principal.NTAccount])
+        #>
+        'Audit S "APPLICATION PACKAGE AUTHORITY\ALL APPLICATION PACKAGES" ReadKey' | ConvertToAce | Should Be ([System.Security.AccessControl.RegistryAuditRule]::new(
+            'ALL APPLICATION PACKAGES',
+            'ReadKey',
+            'ObjectInherit, ContainerInherit',
+            'None',
+            'Success'
+        ))
+    }
 }
 
 Describe 'Test-Acl' {

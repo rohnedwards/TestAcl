@@ -192,6 +192,59 @@ function AstToObj {
         }
     }
 }
+
+function ConvertToSid {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory, ValueFromPipeline)]
+        $InputObject
+    )
+
+    process {
+
+        if ($InputObject -is [System.Security.Principal.SecurityIdentifier]) {
+            return $InputObject
+        }
+        elseif ($InputObject -is [System.Security.Principal.NTAccount]) {
+            # Past this if/else block, we just want strings...
+            $InputObject = $InputObject.ToString()
+        }
+        elseif ($InputObject -isnot [string]) {
+            Write-Error "Unhandled InputObject type: $($InputObject.GetType().Name)"
+            return
+        }
+
+        Write-Verbose "ConverToSid: ${InputObject}"
+        # Check for known strings that need to be "fixed up"
+        $ReplaceRegexes = @(
+            '^APPLICATION PACKAGE AUTHORITY\\'
+        )
+        $BigRegex = $ReplaceRegexes -join '|'
+        $InputObject = $InputObject -replace $BigRegex        
+        
+        Write-Verbose "  -> String value after known replacements: ${InputObject}"
+
+        $Sid = try {
+            ([System.Security.Principal.NTAccount] $InputObject).Translate([System.Security.Principal.SecurityIdentifier])
+        }
+        catch {
+            # That didn't work. Was this maybe a SID?
+            Write-Verbose "  -> NTAccount to SID translation failed. Trying to cast to SID"
+            if ($InputObject -match '^\*?(S-.*)$') {
+                $matches[1] -as [System.Security.Principal.SecurityIdentifier]
+            }
+        }
+
+        # Final test that something is in SID:
+        if ($null -eq $SID) {
+            Write-Error "Unable to determine SID from '${InputObject}'"
+            return
+        }
+
+        Write-Verbose "  -> SID: ${SID}"
+        return $SID
+    }
+}
 function ConvertToAce {
     [CmdletBinding()]
     param(
@@ -279,20 +332,13 @@ function ConvertToAce {
                         # Time to figure out the principal that the ACE should apply to
                         # First, see if we can cast the string to an NTAccount and Translate() to a SID:
                         $SID = try {
-                            ([System.Security.Principal.NTAccount] $CurrentNodeText).Translate([System.Security.Principal.SecurityIdentifier])
+                            $CurrentNodeText | ConvertToSid -ErrorAction Stop
                         }
                         catch {
-                            # That didn't work. Was this maybe a SID?
-                            if ($CurrentNodeText -match '^\*?(S-.*)$') {
-                                $matches[1] -as [System.Security.Principal.SecurityIdentifier]
-                            }
-                        }
-
-                        # Final test that something is in SID:
-                        if ($null -eq $SID) {
-                            Write-Error "Unable to determine SID from '${CurrentNodeText}'"
+                            Write-Error $_
                             return
                         }
+
                     }
                     elseif (0 -eq $AccessMask) {
                         # Figure out the AccessMask. First, is this numeric?
@@ -377,12 +423,16 @@ function ConvertToAce {
                 $AccessMask = $InputObject.GetType().GetProperty('AccessMask', [System.Reflection.BindingFlags] 'NonPublic, Instance').GetValue($InputObject)
 
                 try {
-                    $Sid = $InputObject.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier])
+                    $Sid = $InputObject.IdentityReference | ConvertToSid -ErrorAction Stop
                 }
                 catch {
-                    Write-Error "Error getting SID: ${_}"
+                    Write-Error "Error translating IdentityReference [$($InputObject.IdentityReference)] to SID: ${_}"
                     return
                 }
+            }
+
+            { $InputObject -is [System.Security.AccessControl.ObjectAccessRule] -or $InputObject -is [System.Security.AccessControl.ObjectAuditRule] } {
+                throw "Object Rules not supported yet!"
             }
 
             { $InputObject -is [System.Security.AccessControl.AccessRule] } {
