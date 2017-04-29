@@ -226,7 +226,7 @@ function ConvertToAce {
                 #>
                 $Tokens = $ParseErrors = $null
                 $Ast = [System.Management.Automation.Language.Parser]::ParseInput($InputObject, [ref] $Tokens, [ref] $ParseErrors)
-                $Nodes = $Ast.FindAll({ $args[0].Parent -is [System.Management.Automation.Language.CommandAst]}, $false)
+                $Nodes = $Ast.FindAll({ $args[0].Parent -is [System.Management.Automation.Language.CommandBaseAst]}, $false)
 
                 for ($i = 0; $i -lt $Nodes.Count; $i++) {
 
@@ -242,23 +242,20 @@ function ConvertToAce {
                         Write-Verbose "    -> new CurrentNodeText: ${CurrentNodeText}"
                     }
 
-                    if ($null -eq $AceQualifier) {
+                    if ($null -eq $AceQualifier -and $CurrentNodeText -match '^(?<type>Allow|Deny|Audit)$') {
                         # AceQualifier is optional, so check to see what the first node is:
-                        $AceQualifier = if ($CurrentNodeText -match '^(?<type>Allow|Deny|Audit)$') {
-                            switch ($matches.type) {
-                                Allow { [System.Security.AccessControl.AceQualifier]::AccessAllowed }
-                                Deny { [System.Security.AccessControl.AceQualifier]::AccessDenied }
-                                default { [System.Security.AccessControl.AceQualifier]::SystemAudit }
-                            }
+                        $AceQualifier = switch ($matches.type) {
+                            Allow { [System.Security.AccessControl.AceQualifier]::AccessAllowed }
+                            Deny { [System.Security.AccessControl.AceQualifier]::AccessDenied }
+                            default { [System.Security.AccessControl.AceQualifier]::SystemAudit }
                         }
-                        else {
-                            [System.Security.AccessControl.AceQualifier]::AccessAllowed
-                        }
+                        Write-Verbose "    -> AceQualifier = ${AceQualifier}"
                     }
                     elseif ('SystemAudit' -eq $AceQualifier -and ([System.Security.AccessControl.AceFlags]::AuditFlags.value__ -band $AceFlags.value__) -eq 0) {
                         # At this point, Success, Failure (or SF) are not optional. This node must contain
                         # information about it
-                        if ($CurrentNodeText -match '^(?<success>S(uccess)?)?(\s*\,\s*)?(?<failure>F(ailure)?)?$') {
+#                        if ($CurrentNodeText -match '^(?<success>S(uccess)?)?(\s*\,\s*)?(?<failure>F(ailure)?)?$') {
+                        if (($CurrentNodeText -join ' ') -match '^(?<success>S(uccess)?)?\s*(?<failure>F(ailure)?)?$') {
                             if ($matches.success) {
                                 $AceFlags = $AceFlags.value__ -bor [System.Security.AccessControl.AceFlags]::SuccessfulAccess
                             }
@@ -340,7 +337,11 @@ function ConvertToAce {
                             return
                         }
                     }
+                }
 
+                # If $AceQualifier wasn't determined earlier, set it to Allowed
+                if ($null -eq $AceQualifier) {
+                    $AceQualifier = [System.Security.AccessControl.AceQualifier]::AccessAllowed
                 }
 
                 # Test to see if any inheritance and propagation flags have been set (remember, they were optional). If not, set them for O CC CO

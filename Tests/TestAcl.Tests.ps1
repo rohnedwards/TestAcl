@@ -12,11 +12,76 @@ Describe 'Convert ACEs' {
         $null
     )
 
-    It 'Works with strings' {
-        'Allow Everyone Modify to Object, ChildContainers, and ChildObjects' | ConvertToAce | Should Be $ReferenceAccessAce
-        'Everyone Modify' | ConvertToAce | Should Be $ReferenceAccessAce
-        'Everyone Modify Folder, SubFolders, Files' | ConvertToAce | Should Be $ReferenceAccessAce
-        'Allow *S Modify' | ConvertToAce | Should Be $ReferenceAccessAce
+    Context 'String -> Allow ACE [Allow Everyone Read, Write, Delete AppliesTo Folder, SubFolders, and Files]'  {
+        $Params = @{
+            TestCases = @{ String = 'Allow Everyone Read and Write and Delete to Object, ChildContainers, and ChildObjects' },
+                @{String = 'Everyone Read, Write, Delete' },
+                @{String = 'Everyone Read, Write, and Delete appliesto ThisFolder, SubFolders, Files' },
+                @{String = 'Allow *S-1-1-0 Read, Write, Delete' },
+                @{String = 'S-1-1-0 Read and Write, Delete applies to SubFolders, ChildObjects, Object, ThisFolder'  }
+            Test = {
+                param(
+                    [string] $String
+                )
+                $String | ConvertToAce | Should Be ([System.Security.AccessControl.CommonAce]::new(
+                    'ObjectInherit, ContainerInherit',
+                    [System.Security.AccessControl.AceQualifier]::AccessAllowed,
+                    [System.Security.AccessControl.FileSystemRights] 'Read, Write, Delete',
+                    ([System.Security.Principal.NTAccount] 'Everyone').Translate([System.Security.Principal.SecurityIdentifier]),
+                    $false,
+                    $null
+                ))
+            }
+        }
+        It '<string>' @Params
+    }
+
+    Context 'String -> Allow ACE [Allow ''Network Service'' Read AppliesTo SubFolders, and Files]'  {
+        $Params = @{
+            TestCases = @{ String = 'Allow ''Network Service'' Read to ChildContainers, and ChildObjects' },
+                @{String = '"Network Service" Read CC, CO' },
+                @{String = 'Network` Service Read appliesto SubFolders and Files' },
+                @{String = 'Allow *S-1-5-20 Read ChildContainers, Files, Files' },
+                @{String = 'S-1-5-20 Read applies to SubFolders, ChildObjects'  }
+            Test = {
+                param(
+                    [string] $String
+                )
+                $String | ConvertToAce | Should Be ([System.Security.AccessControl.CommonAce]::new(
+                    'ObjectInherit, ContainerInherit, InheritOnly',
+                    [System.Security.AccessControl.AceQualifier]::AccessAllowed,
+                    [System.Security.AccessControl.FileSystemRights] 'Read',
+                    ([System.Security.Principal.NTAccount] 'Network Service').Translate([System.Security.Principal.SecurityIdentifier]),
+                    $false,
+                    $null
+                ))
+            }
+        }
+        It '<string>' @Params
+    }
+
+    Context 'String -> Deny ACE [Deny Everyone Read, Write, Delete AppliesTo Folder, SubFolders, and Files]'  {
+        $Params = @{
+            TestCases = @{ String = 'Deny Everyone Read and Write and Delete to Object, ChildContainers, and ChildObjects' },
+                @{String = 'Deny Everyone Read, Write, Delete' },
+                @{String = 'Deny Everyone Read, Write, and Delete appliesto ThisFolder, SubFolders, Files' },
+                @{String = 'Deny *S-1-1-0 Read, Write, Delete' },
+                @{String = 'Deny S-1-1-0 Read and Write, Delete applies to SubFolders, ChildObjects, Object, ThisFolder'  }
+            Test = {
+                param(
+                    [string] $String
+                )
+                $String | ConvertToAce | Should Be ([System.Security.AccessControl.CommonAce]::new(
+                    'ObjectInherit, ContainerInherit',
+                    [System.Security.AccessControl.AceQualifier]::AccessDenied,
+                    [System.Security.AccessControl.FileSystemRights] 'Read, Write, Delete',
+                    ([System.Security.Principal.NTAccount] 'Everyone').Translate([System.Security.Principal.SecurityIdentifier]),
+                    $false,
+                    $null
+                ))
+            }
+        }
+        It '<string>' @Params
     }
 
     It 'Works with FileSystemAccessRule' {
