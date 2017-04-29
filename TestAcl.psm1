@@ -591,11 +591,45 @@ function NewCommonSecurityDescriptor {
         $Sddl = $GenericRightsDict = $null
         $IsContainer = $IsDs = $false
 
-        switch ($InputObject.GetType().FullName) {
+        if ($InputObject -is [System.Security.AccessControl.ObjectSecurity]) {
+            Write-Verbose "InputObject is [ObjectSecurity]"
+            $Sddl = $InputObject.GetSecurityDescriptorSddlForm('All')
+            
+            # Use some reflection to get at the info we need for the common SD:
+            $BF = [System.Reflection.BindingFlags] 'NonPublic, Instance'
+            $IsContainer = $InputObject.GetType().GetProperty('IsContainer', $BF).GetValue($InputObject)
+            $IsDS = $InputObject.GetType().GetProperty('IsDS', $BF).GetValue($InputObject)
 
-            { $_ -in 'System.IO.FileInfo', 'System.IO.DirectoryInfo' } {
-                $Sddl = $InputObject | Get-Acl -Audit:$Audit | Select-Object -ExpandProperty Sddl
-                $GenericRightsDict = @{
+            $AccessRightType = $InputObject.AccessRightType
+
+            if ($Audit) {
+                Write-Warning "Should we test for presence of SACL??"
+            }
+        }
+        elseif (($Path = if ($InputObject -is [string]) { $InputObject } elseif ($null -ne $InputObject.PsPath) { $InputObject.PsPath })) {
+
+            Write-Verbose "Contains 'PsPath' property"
+            # Try Get-Acl:
+            try {
+                Get-Acl -ErrorAction Stop -Path $Path | & $MyInvocation.MyCommand -Audit:$Audit
+            }
+            catch {
+                Write-Error "Error while calling Get-Acl: ${_}"                    
+            }
+            return
+        }
+        else {
+            Write-Error "Unsupported object: ${_}"
+            return
+        }
+
+        # We have a whitelist of AccessRightTypes that we know what generic rights mean. If this is $null, that's not an issue, it
+        # just means there won't be a generic rights dictionary
+        $GenericRightsDict = switch ($AccessRightType) {
+            
+            ([System.Security.AccessControl.FileSystemRights]) {
+                Write-Verbose "File/Folder generic rights dictionary"
+                @{
                     GenericRead = [System.Security.AccessControl.FileSystemRights] 'Read, Synchronize'
                     GenericWrite = [System.Security.AccessControl.FileSystemRights] 'Write, ReadPermissions, Synchronize'
                     GenericExecute = [System.Security.AccessControl.FileSystemRights] 'ExecuteFile, ReadAttributes, ReadPermissions, Synchronize'
@@ -603,13 +637,9 @@ function NewCommonSecurityDescriptor {
                 }
             }
 
-            System.IO.DirectoryInfo {
-                $IsContainer = $true
-            }
-
             default {
-                Write-Error "Unsupported object: ${_}"
-                return
+                Write-Verbose "No generic rights dictionary"
+                $null
             }
         }
 

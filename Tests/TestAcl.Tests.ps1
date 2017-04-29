@@ -154,8 +154,33 @@ Describe 'Convert ACEs' {
 
 Describe 'Test-Acl' {
     
-    It 'Works with FileInfo and DirectoryInfo objects' {
-        { Get-Item C:\Windows | Test-Acl -ErrorAction Stop } | Should Not Throw
+    Context 'Different Valid Inputs' {
+        
+        It 'DirectoryInfo: Get-Item C:\Windows' {
+            Get-Item C:\Windows | Test-Acl | Should Be $true
+        }
+        It 'String: C:\Windows' {
+            'C:\Windows' | Test-Acl | Should Be $true
+            Test-Acl C:\Windows | Should Be $true
+        }
+        It 'FileInfo: Get-ChildItem (First file in C:\Windows)' {
+            Get-ChildItem C:\Windows -File | Select-Object -First 1 | Test-Acl | Should Be $true
+        }
+        It 'String: (First file in C:\Windows)' {
+            $FileInfo = Get-ChildItem C:\Windows -File | Select-Object -First 1
+            $FileInfo.FullName | Test-Acl | Should Be $true
+            Test-Acl $FileInfo.FullName | Should Be $true
+        }
+        It 'RegistryKey: Get-Item HKLM:\SOFTWARE' {
+            Get-Item HKLM:\SOFTWARE | Test-Acl | Should Be $true
+        }
+        It 'String: HKLM:\SOFTWARE' {
+            'HKLM:\SOFTWARE' | Test-Acl | Should Be $true
+            Test-Acl HKLM:\SOFTWARE | Should Be $true
+        }
+        It 'Works with FileInfo and DirectoryInfo objects' {
+            { Get-Item C:\Windows | Test-Acl -ErrorAction Stop } | Should Not Throw
+        }
     }
 
     Context '-AllowedAces' {
@@ -168,17 +193,13 @@ Describe 'Test-Acl' {
             Get-Item C:\Windows | Test-Acl -AllowedAces ($SD.Access | select -skip 1) |  Should Be $false
         }
     }
-    It 'RequiredTest' {
-        Get-Item C:\Windows | Test-Acl -RequiredAces '
-             "NT SERVICE\TrustedInstaller" FullControl Object
-             Users ReadAndExecute, Synchronize Object   # This Synchronize shouldnt be necessary
-        '
-    }
-    It 'Works with RegistryKey objects' {
-        { Get-Item HKLM:\SOFTWARE | Test-Acl -ErrorAction Stop } | Should Not Throw
-    }
-    It 'Passes with No ACE collections' {
-        Get-Item C:\Windows | Test-Acl | Should Be $true
+    Context '-RequiredAces' {
+        It 'RequiredTest' {
+            Get-Item C:\Windows | Test-Acl -RequiredAces '
+                "NT SERVICE\TrustedInstaller" FullControl Object
+                Users ReadAndExecute, Synchronize Object   # This Synchronize shouldnt be necessary
+            '
+        }
     }
 
     Context 'Fake out C:\Windows' {
@@ -191,36 +212,8 @@ Describe 'Test-Acl' {
             )
         }
 
-        It 'Works with -RequiredAces CommonAce[]' {
-
-            $AceThatExists = [System.Security.AccessControl.CommonAce]::new(
-                'ObjectInherit, ContainerInherit, InheritOnly', # AceFlags
-                'AccessAllowed', # AceQualifier
-                268435456, # AccessMask
-                'S-1-3-0', # SID
-                $false, # IsCallback
-                $null   # Opaque
-            )
-            $AceThatDoesntExist = [System.Security.AccessControl.CommonAce]::new(
-                'ObjectInherit',
-                'AccessDenied',
-                1,
-                'S-1-3-0',
-                $false,
-                $null
-            )
-
-            Get-Item C:\Windows | Test-Acl -RequiredAces $AceThatExists | Should Be $true
-            Get-Item C:\Windows | Test-Acl -RequiredAces $AceThatExists, $AceThatDoesntExist | Should Be $false
-        }
-
-        It 'Works with -RequiredAces FileSystemAccessRule[]' {
-            # THIS ISN'T WORKING RIGHT NOW. LOOKS LIKE THE MOCKING IS MESSING WITH THE CALL TO TEST-ACL AND THE TRANSFORM ON COMMONACE
-            $ReqAces = [System.Security.AccessControl.FileSystemAccessRule]::new('SYSTEM', 'Modify', 'ObjectInherit, ContainerInherit', 'InheritOnly', 'Allow'), 
-                       [System.Security.AccessControl.FileSystemAccessRule]::new('Users', 'ReadAndExecute', 'None', 'None', 'Allow')
-            Get-Item C:\Windows | Test-Acl -RequiredAces $ReqAces | Should Be $true
-        }
     }
+
     It 'Works with -RequiredAces FileSystemAccessRule[]' {
         # THIS ISN'T WORKING RIGHT NOW. LOOKS LIKE THE MOCKING IS MESSING WITH THE CALL TO TEST-ACL AND THE TRANSFORM ON COMMONACE
         $ReqAces = [System.Security.AccessControl.FileSystemAccessRule]::new('SYSTEM', 'Modify', 'ObjectInherit, ContainerInherit', 'InheritOnly', 'Allow'), 
