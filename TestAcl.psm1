@@ -676,6 +676,7 @@ Add-Type @'
             CC = 2,
             SubFolders = 2,
             ChildKeys = 2,
+            SubKeys = 2,
             Object = 8,
             ThisFile = 8,
             ThisFolder = 8,

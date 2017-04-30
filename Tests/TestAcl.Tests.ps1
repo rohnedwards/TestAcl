@@ -106,7 +106,76 @@ Describe 'Convert ACEs' {
         }
         It '<string>' @Params
     }
+    Context 'String -> Audit ACE [Audit Success Everyone Read, Write, Delete AppliesTo SubFolders and Files]'  {
 
+        $Params = @{
+            TestCases = @{ String = 'Audit Success Everyone Read and Write and Delete to ChildContainers and ChildObjects' },
+                @{String = 'Audit S Everyone FileSystemRights:Read, Write, Delete CC, CO' },
+                @{String = 'Audit S *S-1-1-0 Read, Write, Delete SubFolders and Files' },
+                @{String = 'Audit S S-1-1-0 Read and Write, Delete applies to SubFolders, ChildObjects '  }
+            Test = {
+                param(
+                    [string] $String
+                )
+                $String | ConvertToAce | Should Be ([System.Security.AccessControl.CommonAce]::new(
+                    'ObjectInherit, ContainerInherit, InheritOnly, SuccessfulAccess',
+                    [System.Security.AccessControl.AceQualifier]::SystemAudit,
+                    [System.Security.AccessControl.FileSystemRights] 'Read, Write, Delete',
+                    ([System.Security.Principal.NTAccount] 'Everyone').Translate([System.Security.Principal.SecurityIdentifier]),
+                    $false,
+                    $null
+                ))
+            }
+        }
+        It '<string>' @Params
+    }
+
+    Context 'String -> Audit ACE [Audit Failure Everyone RegistryRights: ReadKey Write, Delete AppliesTo SubKeys]'  {
+
+        $Params = @{
+            TestCases = @{ String = 'Audit Failure Everyone ReadKey ChildContainers' },
+                @{String = 'Audit F Everyone ReadKey CC' },
+                @{String = 'Audit f *S-1-1-0 131097 SubKeys' },
+                @{String = 'Audit F S-1-1-0 ReadKey applies to SubKeys'  }
+            Test = {
+                param(
+                    [string] $String
+                )
+                $String | ConvertToAce | Should Be ([System.Security.AccessControl.CommonAce]::new(
+                    'ContainerInherit, InheritOnly, FailedAccess',
+                    [System.Security.AccessControl.AceQualifier]::SystemAudit,
+                    [System.Security.AccessControl.RegistryRights] 'ReadKey',
+                    ([System.Security.Principal.NTAccount] 'Everyone').Translate([System.Security.Principal.SecurityIdentifier]),
+                    $false,
+                    $null
+                ))
+            }
+        }
+        It '<string>' @Params
+    }
+    Context 'String -> Audit ACE [Audit Success and Failure Everyone RegistryRights: ReadKey Write, Delete AppliesTo SubKeys]'  {
+
+        $Params = @{
+            TestCases = @{ String = 'Audit Success,Failure Everyone ReadKey ChildContainers' },
+                @{String = 'Audit SF Everyone ReadKey CC' },
+                @{String = 'Audit FS *S-1-1-0 131097 SubKeys' },
+                @{String = 'Audit Success and Failure S-1-1-0 ReadKey applies to SubKeys'  }
+            Test = {
+                param(
+                    [string] $String
+                )
+                $String | ConvertToAce | Should Be ([System.Security.AccessControl.CommonAce]::new(
+                    'ContainerInherit, InheritOnly, FailedAccess, SuccessfulAccess',
+                    [System.Security.AccessControl.AceQualifier]::SystemAudit,
+                    [System.Security.AccessControl.RegistryRights] 'ReadKey',
+                    ([System.Security.Principal.NTAccount] 'Everyone').Translate([System.Security.Principal.SecurityIdentifier]),
+                    $false,
+                    $null
+                ))
+            }
+        }
+        It '<string>' @Params
+    }
     It 'Can take multi-line string' {
         {
         '
@@ -127,6 +196,16 @@ Describe 'Convert ACEs' {
             'None',
             'Allow'
         ) | ConvertToAce | Should Be $ReferenceAccessAce
+    }
+    It 'Can specify enumeration, which also changes default inheritance flags' {
+        'Audit F RegistryRights:FullControl' | ConvertToAce | Should Be ([System.Security.AccessControl.CommonAce]::new(
+            'FailedAccess, ContainerInherit',
+            [System.Security.AccessControl.AceQualifier]::SystemAudit,
+            [RegistryRights]::FullControl,
+            'S-1-0-0',
+            $false,
+            $null
+        ))
     }
 
     It 'ALL APPLICATION PACKAGES can be translated' {
