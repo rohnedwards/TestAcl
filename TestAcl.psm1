@@ -56,7 +56,7 @@ No wildcards are allowed for -RequiredAces.
         # provided in the -AllowedAces collection. The collection can contain ACEs that
         # aren't present in the security descriptor, however.
         [Roe.TransformScript({
-            $_ | ConvertToAce
+            $_ | ConvertToAce -ErrorAction Stop
         })]
         [System.Security.AccessControl.CommonAce[]] $AllowedAces,
         [Parameter()]
@@ -64,7 +64,7 @@ No wildcards are allowed for -RequiredAces.
         # descriptor is still allowed to contain ACEs that aren't listed in the
         # -RequiredAces collection. 
         [Roe.TransformScript({
-            $_ | ConvertToAce
+            $_ | ConvertToAce -ErrorAction Stop
         })]
         [System.Security.AccessControl.CommonAce[]] $RequiredAces,
         # By default, ACEs aren't required to match the -AllowedAces or -RequiredAces
@@ -91,9 +91,21 @@ No wildcards are allowed for -RequiredAces.
         [switch] $NoGenericRightsTranslation
     )
 
+    begin {
+
+        # We need to know if there are any Audit ACEs being tested for so we know if we need
+        # to pass -Audit:$true to NewCommonSecurityDescriptor (if user specifies an SD to
+        # function, this doesn't really matter since the -Audit switch wouldn't be used)
+        $AuditRulesSpecified = [bool] (($AllowedAces, $RequiredAces).AceQualifier -eq [System.Security.AccessControl.AceQualifier]::SystemAudit)
+    
+        if ($AuditRulesSpecified) {
+            throw "Audit rules not handled yet!"
+        }
+    }
+
     process {
         try {
-            $SD = $InputObject | NewCommonSecurityDescriptor -ErrorAction Stop -NoGenericRightsTranslation:$NoGenericRightsTranslation
+            $SD = $InputObject | NewCommonSecurityDescriptor -ErrorAction Stop -NoGenericRightsTranslation:$NoGenericRightsTranslation -Audit:$AuditRulesSpecified
         }
         catch {
             Write-Error $_
@@ -122,26 +134,30 @@ No wildcards are allowed for -RequiredAces.
             }
         }
 
+        # Could sort -AllowedAces based on whether or not they're Wildcard ACEs. It would
+        # be slightly more effecient to wait until normal ACEs have been removed. Time will
+        # tell (this would probably be more noticeable on AD objects)
         $AllowedAccessAcesSpecified = $AllowedAuditAcesSpecified = $false
         foreach ($AllowedAce in $AllowedAces) {
-            if ($AllowedAces.AceQualifier -in [System.Security.AccessControl.AceQualifier]::AccessAllowed, [System.Security.AccessControl.AceQualifier]::AccessDenied) {
-                $AllowedAccessAcesSpecified = $true
-            }
-            elseif ($AllowedAces.AceQualifier -eq [System.Security.AccessControl.AceQualifier]::SystemAudit) {
-                $AllowedAuditAcesSpecified = $true
-            }
-            
             Write-Debug "Removing ACE"
             $SD | RemoveAce $AllowedAce
+
+            if ($AllowedAce.AceQualifier -eq [System.Security.AccessControl.AceQualifier]::SystemAudit) {
+                $AllowedAuditAcesSpecified = $true
+            }
+            else {
+                $AllowedAccessAcesSpecified = $true
+            }
         }
-$global:__sd = $SD
+
         if ($AllowedAccessAcesSpecified -and $SD.DiscretionaryAcl.Count -gt 0) {
             Write-Verbose "  -> DACL still contains entries, so there must have been some access not specified in -AllowedAces present"
             return $false
         }
 
-        if ($AllowedAuditAcesSpecified) {
-            throw "Audit ACEs aren't allowed yet!"
+        if ($AllowedAuditAcesSpecified -and $SD.SystemAcl.Count -gt 0) {
+            Write-Verbose "  -> SACL still contains entries, so there must have been some access not specified in -AllowedAces present"
+            return $false
         }
         
         # If we made it this far, we passed the test!
@@ -216,6 +232,11 @@ function AddAce {
     process {
         $GenericRightsDict = $SecurityDescriptor.__GenericRightsDict
 
+        if ($null -ne $Ace.__WildcardString) {
+            Write-Error "Wildcard ACEs aren't valid for -RequiredAces parameter"
+            return
+        }
+
         if ($Ace.AuditFlags -eq [System.Security.AccessControl.AuditFlags]::None) {
             # This is an access ACE
             $SecurityDescriptor.DiscretionaryAcl.AddAccess(
@@ -252,7 +273,25 @@ function RemoveAce {
     process {
         $GenericRightsDict = $SecurityDescriptor.__GenericRightsDict
 
-        if ($Ace.AuditFlags -eq [System.Security.AccessControl.AuditFlags]::None) {
+        if ($null -ne $Ace.__WildcardString) {
+            Write-Verbose "RemoveAce: Wildcard ACE found!"
+            $NonWildcardAce = $Ace.Copy()  # Un-PSObjectify this so we don't go into infinite loop
+            $Acl = if ($Ace.AuditFlags -eq [System.Security.AccessControl.AuditFlags]::None) {
+                Write-Verbose '  -> Access ACE'
+                $SecurityDescriptor.DiscretionaryAcl
+            }
+            else {
+                Write-Verbose '  -> Audit ACE'
+                $SecurityDescriptor.SystemAcl
+            }
+            
+            foreach ($CurrentSid in $Acl.SecurityIdentifier) {
+                Write-Verbose "  -> Removing $($Ace.AceQualifier) ${CurrentSid}; AccessMask = $($Ace.AccessMask)"
+                $NonWildcardAce.SecurityIdentifier = $CurrentSid
+                $SecurityDescriptor | RemoveAce $NonWildcardAce
+            }
+        }
+        elseif ($Ace.AuditFlags -eq [System.Security.AccessControl.AuditFlags]::None) {
             # This is an access ACE
             $SecurityDescriptor.DiscretionaryAcl.RemoveAccess(
                 (ToAccessType $Ace.AceQualifier),
@@ -400,11 +439,11 @@ function ConvertToAce {
                 #>
                 $Tokens = $ParseErrors = $null
                 
-                # We put a & at the beginning of the string to be parsed in case the first token is a double quoted string (remember
-                # that we're abusing the PSParser for this purpose, so the & is just a way to make sure that the string is parsed in
-                # a consistent manner)
-                $Ast = [System.Management.Automation.Language.Parser]::ParseInput("& ${InputObject}", [ref] $Tokens, [ref] $ParseErrors)
-                $Nodes = $Ast.FindAll({ $args[0].Parent -is [System.Management.Automation.Language.CommandBaseAst]}, $false)
+                # We put a 'fakecommand' at the beginning of the string to be parsed in case the first token is a double quoted string
+                # or an array (remember that we're abusing the PSParser for this purpose, so the & is just a way to make sure that the
+                # string is parsed in a consistent manner)
+                $Ast = [System.Management.Automation.Language.Parser]::ParseInput("fakecommand ${InputObject}", [ref] $Tokens, [ref] $ParseErrors)
+                $Nodes = $Ast.FindAll({ $args[0].Parent -is [System.Management.Automation.Language.CommandBaseAst]}, $false) | Select-Object -Skip 1
 $global:__nodes = $Nodes
                 for ($i = 0; $i -lt $Nodes.Count; $i++) {
 

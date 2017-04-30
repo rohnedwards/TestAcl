@@ -290,14 +290,13 @@ Describe 'Convert ACEs' {
     }
     
     It 'Multiple Principals Allowed (Single string)' {
-        $Aces = 'Allow Everyone, Users, Administrators FullControl Object' | ConvertToAce
+        $Aces = 'Everyone, Users, Administrators FullControl Object' | ConvertToAce
         $Aces.Count | Should Be 3
         $Grouped = @($Aces | Group-Object AceQualifier, AccessMask, AceType, InheritanceFlags, PropagationFlags)
         $Grouped.Count | Should Be 1
         $Sids = $Grouped.Group | Select-Object -ExpandProperty SecurityIdentifier | ForEach-Object ToString
         Compare-Object $Sids 'S-1-1-0', 'S-1-5-32-545', 'S-1-5-32-544' | Should BeNullOrEmpty
     }
-
     It 'Multiple Principals Allowed (Multi-line string)' {
         $Aces = '
             Deny Users, Everyone Modify
