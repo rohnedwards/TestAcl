@@ -188,6 +188,16 @@ Describe 'Convert ACEs' {
     It 'ReadAndExecute works (because it has ''and'' in it)' {
         'Audit Success and Failure Everyone ReadAndExecute' | ConvertToAce | Should Be ([System.Security.AccessControl.FileSystemAuditRule]::new('Everyone', 'ReadAndExecute', 'ContainerInherit, ObjectInherit', 'None', 'Success, Failure') | ConvertToAce)
     }
+    It 'Quoted principal works ["Everyone" ReadAndExecute, Synchronize]' {
+        '"Everyone" ReadAndExecute, Synchronize' | ConvertToAce | Should Be ([System.Security.AccessControl.CommonAce]::new(
+            'ContainerInherit, ObjectInherit',
+            [System.Security.AccessControl.AceQualifier]::AccessAllowed,
+            [System.Security.AccessControl.FileSystemRights] 'ReadAndExecute, Synchronize',
+            'S-1-1-0',
+            $false,
+            $null
+        ))
+    }
     It 'Works with FileSystemAccessRule' {
         [System.Security.AccessControl.FileSystemAccessRule]::new(
             'Everyone',
@@ -281,20 +291,35 @@ Describe 'Test-Acl' {
         }
     }
 
-    Context 'Fake out C:\Windows' {
-
-        Mock -ModuleName $Module.Name NewCommonSecurityDescriptor {
-            return New-Object System.Security.AccessControl.CommonSecurityDescriptor (
-                $true, 
-                $false,
-                'O:S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464G:S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464D:PAI(A;OICIIO;GA;;;CO)(A;OICIIO;GA;;;SY)(A;;0x1301bf;;;SY)(A;OICIIO;GA;;;BA)(A;;0x1301bf;;;BA)(A;OICIIO;GXGR;;;BU)(A;;0x1200a9;;;BU)(A;CIIO;GA;;;S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464)(A;;FA;;;S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464)(A;;0x1200a9;;;AC)(A;OICIIO;GXGR;;;AC)(A;;0x1200a9;;;S-1-15-2-2)(A;OICIIO;GXGR;;;S-1-15-2-2)'
-            )
+    Context 'GenericRights on DirectorySecurity' {
+        $SD = New-Object System.Security.AccessControl.DirectorySecurity
+        $SD.SetSecurityDescriptorSddlForm('O:S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464G:S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464D:PAI(A;OICIIO;GA;;;CO)(A;OICIIO;GA;;;SY)(A;;0x1301bf;;;SY)(A;OICIIO;GA;;;BA)(A;;0x1301bf;;;BA)(A;OICIIO;GXGR;;;BU)(A;;0x1200a9;;;BU)(A;CIIO;GA;;;S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464)(A;;FA;;;S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464)(A;;0x1200a9;;;AC)(A;OICIIO;GXGR;;;AC)(A;;0x1200a9;;;S-1-15-2-2)(A;OICIIO;GXGR;;;S-1-15-2-2)')
+        
+        It '-AllowedAces (Synchronize Right Manually Specified)' {
+            $SD | Test-Acl -AllowedAces "
+                'CREATOR OWNER' FullControl
+                SYSTEM FullControl
+                Administrators FullControl
+                Users ReadAndExecute, Synchronize
+                'NT Service\TrustedInstaller' FullControl
+                'ALL APPLICATION PACKAGES' ReadAndExecute, Synchronize
+                'ALL RESTRICTED APPLICATION PACKAGES' ReadAndExecute, Synchronize
+            " | Should Be $true
         }
-
+        It '-AllowedAces (Synchronize Right Manually Specified) fails when expected' {
+            $SD | Test-Acl -AllowedAces "
+                'CREATOR OWNER' FullControl O, CC
+                SYSTEM FullControl
+                Administrators FullControl
+                Users ReadAndExecute, Synchronize
+                'NT Service\TrustedInstaller' FullControl
+                'ALL APPLICATION PACKAGES' ReadAndExecute, Synchronize
+                'ALL RESTRICTED APPLICATION PACKAGES' ReadAndExecute, Synchronize
+            " | Should Be $true
+        }
     }
 
     It 'Works with -RequiredAces FileSystemAccessRule[]' {
-        # THIS ISN'T WORKING RIGHT NOW. LOOKS LIKE THE MOCKING IS MESSING WITH THE CALL TO TEST-ACL AND THE TRANSFORM ON COMMONACE
         $ReqAces = [System.Security.AccessControl.FileSystemAccessRule]::new('SYSTEM', 'Modify', 'ObjectInherit, ContainerInherit', 'InheritOnly', 'Allow'), 
                     [System.Security.AccessControl.FileSystemAccessRule]::new('Users', 'ReadAndExecute', 'None', 'None', 'Allow')
         Get-Item C:\Windows | Test-Acl -RequiredAces $ReqAces | Should Be $true

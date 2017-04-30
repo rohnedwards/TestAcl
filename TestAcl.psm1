@@ -120,6 +120,7 @@ No wildcards are allowed for -RequiredAces.
                 $AllowedAuditAcesSpecified = $true
             }
             
+            Write-Debug "Removing ACE"
             $SD | RemoveAce $AllowedAce
         }
 $global:__sd = $SD
@@ -391,9 +392,13 @@ function ConvertToAce {
                     We're going to use the PS AST parser to split the string.
                 #>
                 $Tokens = $ParseErrors = $null
-                $Ast = [System.Management.Automation.Language.Parser]::ParseInput($InputObject, [ref] $Tokens, [ref] $ParseErrors)
+                
+                # We put a & at the beginning of the string to be parsed in case the first token is a double quoted string (remember
+                # that we're abusing the PSParser for this purpose, so the & is just a way to make sure that the string is parsed in
+                # a consistent manner)
+                $Ast = [System.Management.Automation.Language.Parser]::ParseInput("& ${InputObject}", [ref] $Tokens, [ref] $ParseErrors)
                 $Nodes = $Ast.FindAll({ $args[0].Parent -is [System.Management.Automation.Language.CommandBaseAst]}, $false)
-
+$global:__nodes = $Nodes
                 for ($i = 0; $i -lt $Nodes.Count; $i++) {
 
                     $CurrentNodeText = AstToObj $Nodes[$i]
