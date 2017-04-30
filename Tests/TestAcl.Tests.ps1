@@ -292,14 +292,23 @@ Describe 'Convert ACEs' {
     It 'Multiple Principals Allowed (Single string)' {
         $Aces = 'Allow Everyone, Users, Administrators FullControl Object' | ConvertToAce
         $Aces.Count | Should Be 3
-        $Grouped = $Aces | Group-Object AceQualifier, AccessMask, AceType, InheritanceFlags, PropagationFlags
+        $Grouped = @($Aces | Group-Object AceQualifier, AccessMask, AceType, InheritanceFlags, PropagationFlags)
         $Grouped.Count | Should Be 1
         $Sids = $Grouped.Group | Select-Object -ExpandProperty SecurityIdentifier | ForEach-Object ToString
         Compare-Object $Sids 'S-1-1-0', 'S-1-5-32-545', 'S-1-5-32-544' | Should BeNullOrEmpty
     }
 
     It 'Multiple Principals Allowed (Multi-line string)' {
-
+        $Aces = '
+            Deny Users, Everyone Modify
+            Allow Everyone, Users, Administrators FullControl Object
+            Allow Guests Read
+        ' | ConvertToAce
+        $Aces.Count | Should Be 6
+        $Grouped = $Aces | Group-Object AceQualifier, AccessMask, AceType, InheritanceFlags, PropagationFlags
+        $Grouped.Count | Should Be 3
+        $Sids = $Grouped.Group | Select-Object -ExpandProperty SecurityIdentifier | ForEach-Object ToString
+        Compare-Object $Sids 'S-1-1-0', 'S-1-1-0', 'S-1-5-32-545', 'S-1-5-32-545', 'S-1-5-32-544', 'S-1-5-32-546' | Should BeNullOrEmpty
     }
 }
 
@@ -366,6 +375,25 @@ Describe 'Test-Acl' {
                 'NT Service\TrustedInstaller' FullControl
                 'ALL APPLICATION PACKAGES' ReadAndExecute, Synchronize
                 'ALL RESTRICTED APPLICATION PACKAGES' ReadAndExecute, Synchronize
+            " | Should Be $true
+        }
+        It '-AllowedAces (Synchronize Right Manually Specified; Multiple principals defined)' {
+            $SD | Test-Acl -AllowedAces "
+                Allow 'CREATOR OWNER', SYSTEM, Administrators, 'NT Service\TrustedInstaller' FullControl
+                Allow Users, 'ALL APPLICATION PACKAGES', 'ALL RESTRICTED APPLICATION PACKAGES' ReadAndExecute, Synchronize
+            " | Should Be $true
+        }
+        It '-AllowedAces (Synchronize Right Manually Specified; Multiple principals defined w/o AceType)' {
+            # Used to have an issue w/ first token being an array
+            $SD | Test-Acl -AllowedAces "
+                'CREATOR OWNER', SYSTEM, Administrators, 'NT Service\TrustedInstaller' FullControl
+                Users, 'ALL APPLICATION PACKAGES', 'ALL RESTRICTED APPLICATION PACKAGES' ReadAndExecute, Synchronize
+            " | Should Be $true
+        }
+        It '-AllowedAces (with wildcards, multiple principals, and no Synchronize right)' {
+            $SD | Test-Acl -AllowedAces "
+                'CREATOR OWNER', SYSTEM, Administrators, 'NT Service\TrustedInstaller' FullControl
+                Allow * ReadAndExecute
             " | Should Be $true
         }
         It '-AllowedAces (Synchronize Right not Specified)' {

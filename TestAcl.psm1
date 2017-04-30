@@ -294,7 +294,10 @@ function AstToObj {
         }
 
         System.Object[] {
-            $Ast.Elements.Extent.Text
+            foreach ($Element in $Ast.Elements) {
+                AstToObj $Element
+            }
+            #$Ast.Elements.Extent.Text
         }
 
         default {
@@ -446,14 +449,17 @@ $global:__nodes = $Nodes
                     elseif ($null -eq $Sid) {
                         # Time to figure out the principal that the ACE should apply to
                         # First, see if we can cast the string to an NTAccount and Translate() to a SID:
-                        $SID = try {
-                            $CurrentNodeText | ConvertToSid -ErrorAction Stop
+                        $SID = foreach ($CurrentPrincipalString in $CurrentNodeText) {
+                            try {
+                                $CurrentPrincipalString | ConvertToSid -ErrorAction Stop
+                            }
+                            catch {
+                                [PSCustomObject] @{
+                                    IsWildcard = $true
+                                    WildcardString = $CurrentPrincipalString
+                                }
+                            }
                         }
-                        catch {
-                            Write-Error $_
-                            return
-                        }
-
                     }
                     elseif (0 -eq $AccessMask) {
                         # Figure out the AccessMask. First, is this numeric?
@@ -577,14 +583,36 @@ $global:__nodes = $Nodes
             }
         }
     
-        New-Object System.Security.AccessControl.CommonAce (
-            $AceFlags,
-            $AceQualifier,
-            $AccessMask,
-            $Sid,
-            $false,
-            $null
-        )
+        foreach ($CurrentSid in $SID) {
+            
+            $WildcardString = $null
+            # Is this a real SID, or is it a 'wildcard' string?
+            if ($CurrentSid -is [System.Security.Principal.SecurityIdentifier]) {
+                # Great! Nothing else to do here.
+            }
+            elseif ($CurrentSid.IsWildcard) {
+                $WildcardString = $CurrentSid.WildcardString
+                $CurrentSid = [System.Security.Principal.SecurityIdentifier] 'S-1-1-0' # We need a stand-in; everyone seems like a decent enough one for now... 
+            }
+            else {
+                Write-Warning "Unknown SID: ${CurrentSid}"
+                continue
+            }
+
+            New-Object System.Security.AccessControl.CommonAce (
+                $AceFlags,
+                $AceQualifier,
+                $AccessMask,
+                $CurrentSid,
+                $false,
+                $null
+            ) | ForEach-Object {
+                if ($WildcardString) {
+                    $_ | Add-Member -NotePropertyName __WildcardString -NotePropertyValue $WildcardString
+                }
+                $_
+            }
+        }
     }
 }
 
