@@ -289,6 +289,10 @@ function AstToObj {
             $Ast.Value
         }
 
+        int {
+            $Ast.Value
+        }
+
         System.Object[] {
             $Ast.Elements.Extent.Text
         }

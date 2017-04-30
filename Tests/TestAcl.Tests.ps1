@@ -176,6 +176,48 @@ Describe 'Convert ACEs' {
         }
         It '<string>' @Params
     }
+    Context 'FileSystemRights handle Synchronize properly' {
+        $TestCases = foreach ($AceType in 'Allow', 'Deny', 'Audit') {
+            foreach ($Right in ([System.Security.AccessControl.FileSystemRights] | Get-Member -Static -MemberType Property | select -ExpandProperty Name)) {
+                if ($AceType -eq 'Deny') {
+                    if ($Right -eq 'Synchronize') { continue }
+                    $Right += ', Synchronize'
+                }
+                @{
+                    AceType = $AceType
+                    FileSystemRight = $Right
+                }                
+            }
+        }
+        It '<AceType> Everyone <FileSystemRight>' -TestCases $TestCases -test {
+            param(
+                [string] $AceType,
+                [System.Security.AccessControl.FileSystemRights] $FileSystemRight
+            )
+
+            if ($AceType -in 'Allow', 'Deny') {
+                "${AceType} Everyone ${FileSystemRight}" | ConvertToAce | Should Be ([System.Security.AccessControl.FileSystemAccessRule]::new(
+                    'Everyone',
+                    $FileSystemRight,
+                    'ObjectInherit, ContainerInherit',
+                    'None',
+                    $AceType
+                ) | ConvertToAce)
+            }
+            elseif ($AceType -eq 'Audit') {
+                "${AceType} S Everyone ${FileSystemRight}" | ConvertToAce | Should Be ([System.Security.AccessControl.FileSystemAuditRule]::new(
+                    'Everyone',
+                    $FileSystemRight,
+                    'ObjectInherit, ContainerInherit',
+                    'None',
+                    'Success'
+                ) | ConvertToAce)
+            }
+            else {
+                throw "Unknown AceType"
+            }
+        }
+    }
     It 'Can take multi-line string' {
         {
         '
@@ -238,6 +280,26 @@ Describe 'Convert ACEs' {
             'None',
             'Success'
         )) | ConvertToAce)
+    }
+
+    It 'Wildcard Principals Allowed' {
+        $WildcardAce = 'Allow * ReadAndExecute' | ConvertToAce
+        $WildcardAce.__WildcardString | Should Be '*'
+        $WildcardAce.AccessMask | Should Be 1179817
+
+    }
+    
+    It 'Multiple Principals Allowed (Single string)' {
+        $Aces = 'Allow Everyone, Users, Administrators FullControl Object' | ConvertToAce
+        $Aces.Count | Should Be 3
+        $Grouped = $Aces | Group-Object AceQualifier, AccessMask, AceType, InheritanceFlags, PropagationFlags
+        $Grouped.Count | Should Be 1
+        $Sids = $Grouped.Group | Select-Object -ExpandProperty SecurityIdentifier | ForEach-Object ToString
+        Compare-Object $Sids 'S-1-1-0', 'S-1-5-32-545', 'S-1-5-32-544' | Should BeNullOrEmpty
+    }
+
+    It 'Multiple Principals Allowed (Multi-line string)' {
+
     }
 }
 
