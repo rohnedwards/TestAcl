@@ -77,12 +77,23 @@ No wildcards are allowed for -RequiredAces.
         # match the existing 'FullControl' one. If this switch is specified, though, 
         # the less restrictive ACE would not be considered a match. This should only 
         # apply to -RequiredAce, so this help needs to be rewritten to reflect that.
-        [switch] $ExactMatch
+        [switch] $ExactMatch,
+        # The default return of Test-Acl is a [bool] value letting you know if the SD
+        # is in an approved state. This switch will change the output to a PSObject that
+        # contains the Result, any unapproved ACEs, and any missing ACEs.
+        [switch] $Detailed,
+        # The security descriptor that gets tested isn't necessarily the actual securable
+        # object's SD. For instance, the WINDOWS folder has several ACEs that have access
+        # masks that aren't valid [FileSystemRights]. These rights are called generic
+        # rights, and Test-Acl will translate those generic rights into valid 
+        # [FileSystemRights] by default. If this switch is specified, however, the 
+        # original, raw view of the SD is used instead of the friendlier translated view.
+        [switch] $NoGenericRightsTranslation
     )
 
     process {
         try {
-            $SD = $InputObject | NewCommonSecurityDescriptor -ErrorAction Stop
+            $SD = $InputObject | NewCommonSecurityDescriptor -ErrorAction Stop -NoGenericRightsTranslation:$NoGenericRightsTranslation
         }
         catch {
             Write-Error $_
@@ -156,7 +167,6 @@ function ToAccessMask {
         [System.Collections.IDictionary] $GenericRightsDict
     )
     
-    #if ($null -ne ($GenericRightsDict = $SecurityDescriptor.__GenericRights) -and -not $NoGenericRightsTranslation) {
     if ($null -ne $GenericRightsDict) {
         # Check for presence of generic rights, and replace them based on what the dictionary says
         foreach ($GenRight in $GenericRightsDef.Keys) {
@@ -200,17 +210,12 @@ function AddAce {
         [Parameter(Mandatory, ValueFromPipeline)]
         [System.Security.AccessControl.CommonSecurityDescriptor] $SecurityDescriptor,
         [Parameter(Mandatory, Position=0)]
-        [System.Security.AccessControl.CommonAce] $Ace,
-        [switch] $NoGenericRightsTranslation
+        [System.Security.AccessControl.CommonAce] $Ace
     )
 
     process {
-        $GenericRightsDict = if ($NoGenericRightsTranslation) { 
-            $null
-        }
-        else {
-            $SecurityDescriptor.__GenericRightsDict
-        }
+        $GenericRightsDict = $SecurityDescriptor.__GenericRightsDict
+
         if ($Ace.AuditFlags -eq [System.Security.AccessControl.AuditFlags]::None) {
             # This is an access ACE
             $SecurityDescriptor.DiscretionaryAcl.AddAccess(
@@ -241,17 +246,12 @@ function RemoveAce {
         [Parameter(Mandatory, ValueFromPipeline)]
         [System.Security.AccessControl.CommonSecurityDescriptor] $SecurityDescriptor,
         [Parameter(Mandatory, Position=0)]
-        [System.Security.AccessControl.CommonAce] $Ace,
-        [switch] $NoGenericRightsTranslation
+        [System.Security.AccessControl.CommonAce] $Ace
     )
 
     process {
-        $GenericRightsDict = if ($NoGenericRightsTranslation) { 
-            $null
-        }
-        else {
-            $SecurityDescriptor.__GenericRightsDict
-        }
+        $GenericRightsDict = $SecurityDescriptor.__GenericRightsDict
+
         if ($Ace.AuditFlags -eq [System.Security.AccessControl.AuditFlags]::None) {
             # This is an access ACE
             $SecurityDescriptor.DiscretionaryAcl.RemoveAccess(
@@ -589,7 +589,8 @@ function NewCommonSecurityDescriptor {
     param(
         [Parameter(Mandatory, ValueFromPipeline)]
         $InputObject,
-        [switch] $Audit
+        [switch] $Audit,
+        [switch] $NoGenericRightsTranslation
     )
     
     process {
@@ -628,23 +629,25 @@ function NewCommonSecurityDescriptor {
             return
         }
 
-        # We have a whitelist of AccessRightTypes that we know what generic rights mean. If this is $null, that's not an issue, it
-        # just means there won't be a generic rights dictionary
-        $GenericRightsDict = switch ($AccessRightType) {
-            
-            ([System.Security.AccessControl.FileSystemRights]) {
-                Write-Verbose "File/Folder generic rights dictionary"
-                @{
-                    GenericRead = [System.Security.AccessControl.FileSystemRights] 'Read, Synchronize'
-                    GenericWrite = [System.Security.AccessControl.FileSystemRights] 'Write, ReadPermissions, Synchronize'
-                    GenericExecute = [System.Security.AccessControl.FileSystemRights] 'ExecuteFile, ReadAttributes, ReadPermissions, Synchronize'
-                    GenericAll = [System.Security.AccessControl.FileSystemRights] 'FullControl'
+        if (-not $NoGenericRightsTranslation) {
+            # We have a whitelist of AccessRightTypes that we know what generic rights mean. If this is $null, that's not an issue, it
+            # just means there won't be a generic rights dictionary
+            $GenericRightsDict = switch ($AccessRightType) {
+                
+                ([System.Security.AccessControl.FileSystemRights]) {
+                    Write-Verbose "File/Folder generic rights dictionary"
+                    @{
+                        GenericRead = [System.Security.AccessControl.FileSystemRights] 'Read, Synchronize'
+                        GenericWrite = [System.Security.AccessControl.FileSystemRights] 'Write, ReadPermissions, Synchronize'
+                        GenericExecute = [System.Security.AccessControl.FileSystemRights] 'ExecuteFile, ReadAttributes, ReadPermissions, Synchronize'
+                        GenericAll = [System.Security.AccessControl.FileSystemRights] 'FullControl'
+                    }
                 }
-            }
 
-            default {
-                Write-Verbose "No generic rights dictionary"
-                $null
+                default {
+                    Write-Verbose "No generic rights dictionary"
+                    $null
+                }
             }
         }
 

@@ -306,6 +306,26 @@ Describe 'Test-Acl' {
                 'ALL RESTRICTED APPLICATION PACKAGES' ReadAndExecute, Synchronize
             " | Should Be $true
         }
+        It '-AllowedAces (Synchronize Right not Specified)' {
+            $SD | Test-Acl -AllowedAces "
+                'CREATOR OWNER' FullControl
+                SYSTEM FullControl
+                Administrators FullControl
+                Users ReadAndExecute
+                'NT Service\TrustedInstaller' FullControl
+                'ALL APPLICATION PACKAGES' ReadAndExecute
+                'ALL RESTRICTED APPLICATION PACKAGES' ReadAndExecute
+            " | Should Be $true
+        }
+        It '-AllowedAces with wildcard (Synchronize Right not Specified)' {
+            $SD | Test-Acl -AllowedAces "
+                'CREATOR OWNER' FullControl
+                SYSTEM FullControl
+                Administrators FullControl
+                'NT Service\TrustedInstaller' FullControl
+                Allow * ReadAndExecute
+            " | Should Be $true
+        }
         It '-AllowedAces (Synchronize Right Manually Specified) fails when expected' {
             $SD | Test-Acl -AllowedAces "
                 'CREATOR OWNER' FullControl O, CC
@@ -315,7 +335,50 @@ Describe 'Test-Acl' {
                 'NT Service\TrustedInstaller' FullControl
                 'ALL APPLICATION PACKAGES' ReadAndExecute, Synchronize
                 'ALL RESTRICTED APPLICATION PACKAGES' ReadAndExecute, Synchronize
-            " | Should Be $true
+            " -Detailed | Should Be 'ADD THIS LATER'
+        }
+        It '-AllowedAces (GenericRights not translated with -NoGenericRightsTranslation switch)' {
+            $SD | Test-Acl -AllowedAces "
+                'CREATOR OWNER' FullControl
+                SYSTEM FullControl
+                Administrators FullControl
+                Users ReadAndExecute, Synchronize
+                'NT Service\TrustedInstaller' FullControl
+                'ALL APPLICATION PACKAGES' ReadAndExecute, Synchronize
+                'ALL RESTRICTED APPLICATION PACKAGES' ReadAndExecute, Synchronize
+            " -NoGenericRightsTranslation | Should Be $false
+        }
+        It '-AllowedAces (GenericRights not translated with -NoGenericRightsTranslation switch; GenericRights in ACEs pass)' {
+            $SD | Test-Acl -AllowedAces "
+                'CREATOR OWNER' 268435456
+                SYSTEM 268435456
+                SYSTEM FullControl
+                Administrators FullControl
+                Administrators 268435456
+                Users ReadAndExecute, Synchronize
+                Users -1610612736
+                'NT Service\TrustedInstaller' FullControl
+                'NT Service\TrustedInstaller' 268435456
+                'ALL APPLICATION PACKAGES' ReadAndExecute, Synchronize
+                'ALL APPLICATION PACKAGES' -1610612736
+                'ALL RESTRICTED APPLICATION PACKAGES' ReadAndExecute, Synchronize
+                'ALL RESTRICTED APPLICATION PACKAGES' -1610612736
+            " -NoGenericRightsTranslation | Should Be $true
+        }
+        It '-AllowedAces (GenericRights not translated with -NoGenericRightsTranslation switch; very permissive access masks pass)' {
+            $SD | Test-Acl -AllowedAces "
+                'CREATOR OWNER' $([int]::MaxValue)  # This wouldn't remove GenericRead
+                SYSTEM 0xffffffff
+                Administrators 0xffffffff
+                Users ReadAndExecute, Synchronize
+                Users -1610612736
+                'NT Service\TrustedInstaller' FullControl
+                'NT Service\TrustedInstaller' 268435456
+                'ALL APPLICATION PACKAGES' ReadAndExecute, Synchronize
+                'ALL APPLICATION PACKAGES' -1610612736
+                'ALL RESTRICTED APPLICATION PACKAGES' ReadAndExecute, Synchronize
+                'ALL RESTRICTED APPLICATION PACKAGES' -1610612736
+            " -NoGenericRightsTranslation | Should Be $true
         }
     }
 
