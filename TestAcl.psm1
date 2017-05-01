@@ -444,7 +444,7 @@ function ConvertToAce {
                 # string is parsed in a consistent manner)
                 $Ast = [System.Management.Automation.Language.Parser]::ParseInput("fakecommand ${InputObject}", [ref] $Tokens, [ref] $ParseErrors)
                 $Nodes = $Ast.FindAll({ $args[0].Parent -is [System.Management.Automation.Language.CommandBaseAst]}, $false) | Select-Object -Skip 1
-$global:__nodes = $Nodes
+
                 for ($i = 0; $i -lt $Nodes.Count; $i++) {
 
                     $CurrentNodeText = AstToObj $Nodes[$i]
@@ -516,8 +516,8 @@ $global:__nodes = $Nodes
                             $CurrentNodeText[0] = $matches.therest
                         }
 
-                        foreach ($CurrentType in $PotentialEnumTypes) {
-                            if (($AccessMask = $CurrentNodeText -as $CurrentType)) {
+                        foreach ($AccessRightType in $PotentialEnumTypes) {
+                            if (($AccessMask = $CurrentNodeText -as $AccessRightType)) {
                                 break    
                             }
                         }
@@ -525,6 +525,23 @@ $global:__nodes = $Nodes
                         if ([int] $AccessMask -eq 0) {
                             Write-Error "Unable to determine access mask from '${CurrentNodeText}'"
                             return
+                        }
+
+                        # This probably belongs in ToAccessMask. This is where we're going to do some
+                        # "fixups" for certain access rights (I'm actually only aware of this happening
+                        # with FileSystemRights). The thing is that FileSystemAccessRule class has logic
+                        # to automatically add the 'Synchronize' right to any Allow ACEs, and to remove
+                        # it from any 'Deny' ACEs (unless it's FullControl). Because we don't want users
+                        # to have to specify Synchronize manually, we're going to handle that, too
+                        if ($AccessRightType -eq [System.Security.AccessControl.FileSystemRights]) {
+                            if ($AceQualifier -eq 'AccessAllowed' -or $null -eq $AceQualifier) {
+                                Write-Verbose "Adding Synchronize right"
+                                $AccessMask = $AccessMask -bor [System.Security.AccessControl.FileSystemRights]::Synchronize
+                            }
+                            elseif ($AceQualifier -eq 'AccessDenied' -and $AccessMask -ne [System.Security.AccessControl.FileSystemRights]::FullControl.value__) {
+                                Write-Verbose "Removing Synchronize right"
+                                $AccessMask = $AccessMask -band (-bnot [System.Security.AccessControl.FileSystemRights]::Synchronize) 
+                            }
                         }
                     }
                     elseif (($AceFlags.value__ -band [System.Security.AccessControl.AceFlags]::InheritanceFlags) -eq 0) {

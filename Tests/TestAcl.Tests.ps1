@@ -17,7 +17,7 @@ Describe 'Convert ACEs' {
             TestCases = @{ String = 'Allow Everyone Read and Write and Delete to Object, ChildContainers, and ChildObjects' },
                 @{String = 'Everyone Read, Write, Delete' },
                 @{String = 'Everyone Read, Write, and Delete appliesto ThisFolder, SubFolders, Files' },
-                @{String = 'Allow *S-1-1-0 197023' },
+                @{String = 'Allow *S-1-1-0 1179785' },
                 @{String = 'S-1-1-0 Read and Write, Delete applies to SubFolders, ChildObjects, Object, ThisFolder'  }
             Test = {
                 param(
@@ -26,7 +26,7 @@ Describe 'Convert ACEs' {
                 $String | ConvertToAce | Should Be ([System.Security.AccessControl.CommonAce]::new(
                     'ObjectInherit, ContainerInherit',
                     [System.Security.AccessControl.AceQualifier]::AccessAllowed,
-                    [System.Security.AccessControl.FileSystemRights] 'Read, Write, Delete',
+                    [System.Security.AccessControl.FileSystemRights] 'Read, Write, Delete, Synchronize',
                     ([System.Security.Principal.NTAccount] 'Everyone').Translate([System.Security.Principal.SecurityIdentifier]),
                     $false,
                     $null
@@ -50,7 +50,7 @@ Describe 'Convert ACEs' {
                 $String | ConvertToAce | Should Be ([System.Security.AccessControl.CommonAce]::new(
                     'ObjectInherit, ContainerInherit, InheritOnly',
                     [System.Security.AccessControl.AceQualifier]::AccessAllowed,
-                    [System.Security.AccessControl.FileSystemRights] 'Read',
+                    [System.Security.AccessControl.FileSystemRights] 'Read, Synchronize',
                     ([System.Security.Principal.NTAccount] 'Network Service').Translate([System.Security.Principal.SecurityIdentifier]),
                     $false,
                     $null
@@ -74,7 +74,7 @@ Describe 'Convert ACEs' {
                 $String | ConvertToAce | Should Be ([System.Security.AccessControl.CommonAce]::new(
                     'None',
                     [System.Security.AccessControl.AceQualifier]::AccessAllowed,
-                    [System.Security.AccessControl.FileSystemRights] 'Read',
+                    [System.Security.AccessControl.FileSystemRights] 'Read, Synchronize',
                     ([System.Security.Principal.NTAccount] 'Network Service').Translate([System.Security.Principal.SecurityIdentifier]),
                     $false,
                     $null
