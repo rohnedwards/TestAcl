@@ -100,6 +100,9 @@ No wildcards are allowed for -RequiredAces.
         # function, this doesn't really matter since the -Audit switch wouldn't be used)
         $AuditRulesSpecified = [bool] (($AllowedAces, $RequiredAces).AceQualifier -eq [System.Security.AccessControl.AceQualifier]::SystemAudit)
     
+        if ($ExactMatch) {
+            throw "-ExactMatch isn't implemented yet"
+        }
     }
 
     process {
@@ -541,7 +544,6 @@ function ConvertToAce {
                 # string is parsed in a consistent manner)
                 $Ast = [System.Management.Automation.Language.Parser]::ParseInput("fakecommand ${InputObject}", [ref] $Tokens, [ref] $ParseErrors)
                 $Nodes = $Ast.FindAll({ $args[0].Parent -is [System.Management.Automation.Language.CommandBaseAst]}, $false) | Select-Object -Skip 1
-$global:__nodes = $Nodes
 
                 $LastTokenSection = 0   # Adding this late to the game so we can use this instead of tracking flags and variable contents. Will eventually
                                         # change all of the if logic to look at this thing.
