@@ -12,12 +12,12 @@ Describe 'Convert ACEs' {
         $null
     )
 
-    Context 'String -> Allow ACE [Allow Everyone Read, Write, Delete AppliesTo Folder, SubFolders, and Files]'  {
+    Context 'String -> File Allow ACE [Allow Everyone Read, Write, Delete AppliesTo Folder, SubFolders, and Files]'  {
         $Params = @{
             TestCases = @{ String = 'Allow Everyone Read and Write and Delete to Object, ChildContainers, and ChildObjects' },
                 @{String = 'Everyone Read, Write, Delete' },
                 @{String = 'Everyone Read, Write, and Delete appliesto ThisFolder, SubFolders, Files' },
-                @{String = 'Allow *S-1-1-0 1179785' },
+                @{String = 'Allow *S-1-1-0 1245599' },
                 @{String = 'S-1-1-0 Read and Write, Delete applies to SubFolders, ChildObjects, Object, ThisFolder'  }
             Test = {
                 param(
@@ -36,7 +36,7 @@ Describe 'Convert ACEs' {
         It '<string>' @Params
     }
 
-    Context 'String -> Allow ACE [Allow ''Network Service'' Read AppliesTo SubFolders, and Files]'  {
+    Context 'String -> File Allow ACE [Allow ''Network Service'' Read AppliesTo SubFolders, and Files]'  {
         $Params = @{
             TestCases = @{ String = 'Allow ''Network Service'' Read to ChildContainers, and ChildObjects' },
                 @{String = '"Network Service" Read CC, CO' },
@@ -60,7 +60,7 @@ Describe 'Convert ACEs' {
         It '<string>' @Params
     }
 
-    Context 'String -> Allow ACE [Allow ''Network Service'' Read AppliesTo Object]'  {
+    Context 'String -> File Allow ACE [Allow ''Network Service'' Read AppliesTo Object]'  {
         $Params = @{
             TestCases = @{ String = 'Allow ''Network Service'' Read to Object' },
                 @{String = '"Network Service" Read O' },
@@ -83,7 +83,8 @@ Describe 'Convert ACEs' {
         }
         It '<string>' @Params
     }
-    Context 'String -> Deny ACE [Deny Everyone Read, Write, Delete AppliesTo Folder, SubFolders, and Files]'  {
+
+    Context 'String -> File Deny ACE [Deny Everyone Read, Write, Delete AppliesTo Folder, SubFolders, and Files]'  {
         $Params = @{
             TestCases = @{ String = 'Deny Everyone Read and Write and Delete to Object, ChildContainers, and ChildObjects' },
                 @{String = 'Deny Everyone Read, Write, Delete' },
@@ -106,7 +107,7 @@ Describe 'Convert ACEs' {
         }
         It '<string>' @Params
     }
-    Context 'String -> Audit ACE [Audit Success Everyone Read, Write, Delete AppliesTo SubFolders and Files]'  {
+    Context 'String -> File Audit ACE [Audit Success Everyone Read, Write, Delete AppliesTo SubFolders and Files]'  {
 
         $Params = @{
             TestCases = @{ String = 'Audit Success Everyone Read and Write and Delete to ChildContainers and ChildObjects' },
@@ -130,7 +131,7 @@ Describe 'Convert ACEs' {
         It '<string>' @Params
     }
 
-    Context 'String -> Audit ACE [Audit Failure Everyone RegistryRights: ReadKey Write, Delete AppliesTo SubKeys]'  {
+    Context 'String -> File Audit ACE [Audit Failure Everyone RegistryRights: ReadKey Write, Delete AppliesTo SubKeys]'  {
 
         $Params = @{
             TestCases = @{ String = 'Audit Failure Everyone ReadKey ChildContainers' },
@@ -153,7 +154,7 @@ Describe 'Convert ACEs' {
         }
         It '<string>' @Params
     }
-    Context 'String -> Audit ACE [Audit Success and Failure Everyone RegistryRights: ReadKey Write, Delete AppliesTo SubKeys]'  {
+    Context 'String -> File Audit ACE [Audit Success and Failure Everyone RegistryRights: ReadKey Write, Delete AppliesTo SubKeys]'  {
 
         $Params = @{
             TestCases = @{ String = 'Audit Success,Failure Everyone ReadKey ChildContainers' },
@@ -219,18 +220,18 @@ Describe 'Convert ACEs' {
         }
     }
     It 'Can take multi-line string' {
-        {
-        '
+        $Aces = '
              "NT SERVICE\TrustedInstaller" FullControl Object
              Users ReadAndExecute, Synchronize Object   # This Synchronize shouldnt be necessary
         ' | ConvertToAce -ErrorAction Stop 
-        } | Should Not Throw
+        $Aces.Count | Should Be 2
     }
 
     It 'ReadAndExecute works (because it has ''and'' in it)' {
         'Audit Success and Failure Everyone ReadAndExecute' | ConvertToAce | Should Be ([System.Security.AccessControl.FileSystemAuditRule]::new('Everyone', 'ReadAndExecute', 'ContainerInherit, ObjectInherit', 'None', 'Success, Failure') | ConvertToAce)
     }
-    It 'Quoted principal works ["Everyone" ReadAndExecute, Synchronize]' {
+    
+    It 'Quoted principal works as first token ["Everyone" ReadAndExecute, Synchronize]' {
         '"Everyone" ReadAndExecute, Synchronize' | ConvertToAce | Should Be ([System.Security.AccessControl.CommonAce]::new(
             'ContainerInherit, ObjectInherit',
             [System.Security.AccessControl.AceQualifier]::AccessAllowed,
@@ -240,6 +241,7 @@ Describe 'Convert ACEs' {
             $null
         ))
     }
+    
     It 'Works with FileSystemAccessRule' {
         [System.Security.AccessControl.FileSystemAccessRule]::new(
             'Everyone',
@@ -249,6 +251,7 @@ Describe 'Convert ACEs' {
             'Allow'
         ) | ConvertToAce | Should Be $ReferenceAccessAce
     }
+
     It 'Can specify enumeration, which also changes default inheritance flags' {
         'Audit F RegistryRights:FullControl' | ConvertToAce | Should Be ([System.Security.AccessControl.CommonAce]::new(
             'FailedAccess, ContainerInherit',
@@ -297,6 +300,7 @@ Describe 'Convert ACEs' {
         $Sids = $Grouped.Group | Select-Object -ExpandProperty SecurityIdentifier | ForEach-Object ToString
         Compare-Object $Sids 'S-1-1-0', 'S-1-5-32-545', 'S-1-5-32-544' | Should BeNullOrEmpty
     }
+    
     It 'Multiple Principals Allowed (Multi-line string)' {
         $Aces = '
             Deny Users, Everyone Modify
@@ -308,6 +312,14 @@ Describe 'Convert ACEs' {
         $Grouped.Count | Should Be 3
         $Sids = $Grouped.Group | Select-Object -ExpandProperty SecurityIdentifier | ForEach-Object ToString
         Compare-Object $Sids 'S-1-1-0', 'S-1-1-0', 'S-1-5-32-545', 'S-1-5-32-545', 'S-1-5-32-544', 'S-1-5-32-546' | Should BeNullOrEmpty
+    }
+
+    Context 'Test invalid strings' {
+        It 'Invalid string: <string>' -TestCases @{ String = 'Audit Everyone Modify' }, @{ String = 'potato' }, @{ String = 'Allow Everyone Modify What are those?'} -test {
+            param([string] $String)        
+
+            { $String | ConvertToAce -ErrorAction Stop } | Should Throw
+        }
     }
 }
 

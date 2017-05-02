@@ -312,9 +312,20 @@ function RemoveAce {
             }
             
             foreach ($CurrentSid in $Acl.SecurityIdentifier) {
-                Write-Verbose "  -> Removing $($Ace.AceQualifier) ${CurrentSid}; AccessMask = $($Ace.AccessMask)"
-                $NonWildcardAce.SecurityIdentifier = $CurrentSid
-                $SecurityDescriptor | RemoveAce $NonWildcardAce
+                try {
+                    $Principal = $CurrentSid.Translate([System.Security.Principal.NTAccount])
+                    if ($Principal -like $Ace.__WildcardString) {
+                        Write-Verbose "  -> Removing $($Ace.AceQualifier) ${Principal}; AccessMask = $($Ace.AccessMask)"
+                        $NonWildcardAce.SecurityIdentifier = $CurrentSid
+                        $SecurityDescriptor | RemoveAce $NonWildcardAce
+                    }
+                    else {
+                        Write-Verbose "  -> '${Principal}' name doesn't match wildcard ($($Ace.__WildcardString))"
+                    }
+                }
+                catch {
+                    Write-Warning "Error while processing wildcard ACE for '${CurrentSid}': ${_}"
+                }
             }
             return # All the work's been done; we don't want to drop out of this block
         }
