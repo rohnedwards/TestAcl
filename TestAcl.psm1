@@ -55,18 +55,20 @@ No wildcards are allowed for -RequiredAces.
         # is provided, then the security descriptor CANNOT contain any ACEs except what's
         # provided in the -AllowedAces collection. The collection can contain ACEs that
         # aren't present in the security descriptor, however.
+        [System.Security.AccessControl.QualifiedAce[]] 
         [Roe.TransformScript({
             $_ | ConvertToAce -ErrorAction Stop
         })]
-        [System.Security.AccessControl.CommonAce[]] $AllowedAces,
+        $AllowedAces,
         [Parameter()]
         # A list of ACEs that MUST be present in the security descriptor. The security
         # descriptor is still allowed to contain ACEs that aren't listed in the
         # -RequiredAces collection. 
+        [System.Security.AccessControl.QualifiedAce[]] 
         [Roe.TransformScript({
             $_ | ConvertToAce -ErrorAction Stop
         })]
-        [System.Security.AccessControl.CommonAce[]] $RequiredAces,
+        $RequiredAces,
         # By default, ACEs aren't required to match the -AllowedAces or -RequiredAces
         # exactly, i.e., the AccessMask and/or InheritanceFlags can differ as long as 
         # the effective access is present. For example, if the security descriptor 
@@ -98,9 +100,6 @@ No wildcards are allowed for -RequiredAces.
         # function, this doesn't really matter since the -Audit switch wouldn't be used)
         $AuditRulesSpecified = [bool] (($AllowedAces, $RequiredAces).AceQualifier -eq [System.Security.AccessControl.AceQualifier]::SystemAudit)
     
-        if ($AuditRulesSpecified) {
-            throw "Audit rules not handled yet!"
-        }
     }
 
     process {
@@ -128,9 +127,15 @@ No wildcards are allowed for -RequiredAces.
         # information about WHY it failed
         $StartingSddlForm = $SD.GetSddlForm('All')
         foreach ($ReqAce in $RequiredAces) {
-            $SD | AddAce $ReqAce
-            if ($StartingSddlForm -ne $SD.GetSddlForm('All')) {
-                return $false
+            try {
+                $SD | AddAce $ReqAce -ErrorAction Stop
+                if ($StartingSddlForm -ne $SD.GetSddlForm('All')) {
+                    return $false
+                }
+            }
+            catch {
+                Write-Error $_
+                return
             }
         }
 
@@ -140,7 +145,13 @@ No wildcards are allowed for -RequiredAces.
         $AllowedAccessAcesSpecified = $AllowedAuditAcesSpecified = $false
         foreach ($AllowedAce in $AllowedAces) {
             Write-Debug "Removing ACE"
-            $SD | RemoveAce $AllowedAce
+            try {
+                $SD | RemoveAce $AllowedAce -ErrorAction Stop
+            }
+            catch {
+                Write-Error $_
+                return
+            }
 
             if ($AllowedAce.AceQualifier -eq [System.Security.AccessControl.AceQualifier]::SystemAudit) {
                 $AllowedAuditAcesSpecified = $true
@@ -149,7 +160,7 @@ No wildcards are allowed for -RequiredAces.
                 $AllowedAccessAcesSpecified = $true
             }
         }
-
+$global:__sd = $SD
         if ($AllowedAccessAcesSpecified -and $SD.DiscretionaryAcl.Count -gt 0) {
             Write-Verbose "  -> DACL still contains entries, so there must have been some access not specified in -AllowedAces present"
             return $false
@@ -226,7 +237,7 @@ function AddAce {
         [Parameter(Mandatory, ValueFromPipeline)]
         [System.Security.AccessControl.CommonSecurityDescriptor] $SecurityDescriptor,
         [Parameter(Mandatory, Position=0)]
-        [System.Security.AccessControl.CommonAce] $Ace
+        [System.Security.AccessControl.QualifiedAce] $Ace
     )
 
     process {
@@ -237,26 +248,41 @@ function AddAce {
             return
         }
 
+        # First, get common Add() args for either ACE types:
+        #    Access: AccessType, SID, AccessMask, InheritanceFlags, PropagationFlags
+        #    Audit:  AuditFlags, SID, AccessMask, InheritanceFlags, PropagationFlags
+        #
+        # Next, if Ace is an ObjectAce, we need to add 3 extra args:
+        #    objectFlags, objectType, inheritedObjectType
+        $Arguments = New-Object System.Collections.ArrayList
+
         if ($Ace.AuditFlags -eq [System.Security.AccessControl.AuditFlags]::None) {
-            # This is an access ACE
-            $SecurityDescriptor.DiscretionaryAcl.AddAccess(
-                (ToAccessType $Ace.AceQualifier),
-                $Ace.SecurityIdentifier,
-                (ToAccessMask $Ace.AccessMask -GenericRights $GenericRightsDict),
-                $Ace.InheritanceFlags,
-                $Ace.PropagationFlags
-            )
+            $null = $Arguments.Add((ToAccessType $Ace.AceQualifier))
+            $MethodName = 'AddAccess'
+            $Acl = $SecurityDescriptor.DiscretionaryAcl
         }
         else {
-            # This is an audit ACE
-            $SecurityDescriptor.SystemAcl.AddAudit(
-                $Ace.AuditFlags,
-                $Ace.SecurityIdentifier,
-                (ToAccessMask $Ace.AccessMask -GenericRights $GenericRightsDict),
-                $Ace.InheritanceFlags,
-                $Ace.PropagationFlags
-            )
+            $null = $Arguments.Add($Ace.AuditFlags)
+            $MethodName = 'AddAudit'
+            $Acl = $SecurityDescriptor.SystemAcl
         }
+
+        $null = $Arguments.AddRange((
+            $Ace.SecurityIdentifier,
+            (ToAccessMask $Ace.AccessMask -GenericRights $GenericRightsDict),
+            $Ace.InheritanceFlags,
+            $Ace.PropagationFlags
+        ))
+
+        if ($Ace -is [System.Security.AccessControl.ObjectAce]) {
+            $null = $Arguments.AddRange((
+                $Ace.ObjectAceFlags,
+                $Ace.ObjectAceType,
+                $Ace.InheritedObjectAceType
+            ))
+        }
+
+        $null = $Acl.$MethodName.Invoke($Arguments.ToArray())
     }
 }
 
@@ -267,7 +293,7 @@ function RemoveAce {
         [Parameter(Mandatory, ValueFromPipeline)]
         [System.Security.AccessControl.CommonSecurityDescriptor] $SecurityDescriptor,
         [Parameter(Mandatory, Position=0)]
-        [System.Security.AccessControl.CommonAce] $Ace
+        [System.Security.AccessControl.QualifiedAce] $Ace
     )
 
     process {
@@ -290,27 +316,45 @@ function RemoveAce {
                 $NonWildcardAce.SecurityIdentifier = $CurrentSid
                 $SecurityDescriptor | RemoveAce $NonWildcardAce
             }
+            return # All the work's been done; we don't want to drop out of this block
         }
-        elseif ($Ace.AuditFlags -eq [System.Security.AccessControl.AuditFlags]::None) {
-            # This is an access ACE
-            $SecurityDescriptor.DiscretionaryAcl.RemoveAccess(
-                (ToAccessType $Ace.AceQualifier),
-                $Ace.SecurityIdentifier,
-                (ToAccessMask $Ace.AccessMask -GenericRights $GenericRightsDict),
-                $Ace.InheritanceFlags,
-                $Ace.PropagationFlags
-            ) | Out-Null
+
+
+        # First, get common Add() args for either ACE types:
+        #    Access: AccessType, SID, AccessMask, InheritanceFlags, PropagationFlags
+        #    Audit:  AuditFlags, SID, AccessMask, InheritanceFlags, PropagationFlags
+        #
+        # Next, if Ace is an ObjectAce, we need to add 3 extra args:
+        #    objectFlags, objectType, inheritedObjectType
+        $Arguments = New-Object System.Collections.ArrayList
+
+        if ($Ace.AuditFlags -eq [System.Security.AccessControl.AuditFlags]::None) {
+            $null = $Arguments.Add((ToAccessType $Ace.AceQualifier))
+            $MethodName = 'RemoveAccess'
+            $Acl = $SecurityDescriptor.DiscretionaryAcl
         }
         else {
-            # This is an audit ACE
-            $SecurityDescriptor.SystemAcl.RemoveAudit(
-                $Ace.AuditFlags,
-                $Ace.SecurityIdentifier,
-                (ToAccessMask $Ace.AccessMask -GenericRights $GenericRightsDict),
-                $Ace.InheritanceFlags,
-                $Ace.PropagationFlags
-            ) | Out-Null
+            $null = $Arguments.Add($Ace.AuditFlags)
+            $MethodName = 'RemoveAudit'
+            $Acl = $SecurityDescriptor.SystemAcl
         }
+
+        $null = $Arguments.AddRange((
+            $Ace.SecurityIdentifier,
+            (ToAccessMask $Ace.AccessMask -GenericRights $GenericRightsDict),
+            $Ace.InheritanceFlags,
+            $Ace.PropagationFlags
+        ))
+
+        if ($Ace -is [System.Security.AccessControl.ObjectAce]) {
+            $null = $Arguments.AddRange((
+                $Ace.ObjectAceFlags,
+                $Ace.ObjectAceType,
+                $Ace.InheritedObjectAceType
+            ))
+        }
+
+        $null = $Acl.$MethodName.Invoke($Arguments.ToArray())
     }
 }
 
@@ -409,7 +453,7 @@ function ConvertToAce {
 
         [System.Security.AccessControl.AceFlags] $AceFlags = [System.Security.AccessControl.AceFlags]::None   
         $AccessMask = 0
-        $AceQualifier = $Sid = $null
+        $ObjectAceType = $InheritedObjectAceType = $AceQualifier = $Sid = $null
         $AceFlagsDefined = $false
 
         switch ($InputObject.GetType()) {
@@ -435,6 +479,9 @@ function ConvertToAce {
                     Takes this form:
                     [Allow|Deny|Audit (S[uccess]|F[ailure])] 'Principal' Rights1, Rights2 [Object, ChildContainers, ChildObjects]
 
+                    Object ACEs have an extra section at the end with two GUIDs separated by commas (we're a little stricter on this for
+                    now than everything else...this will evolve, though)
+
                     We're going to use the PS AST parser to split the string.
                 #>
                 $Tokens = $ParseErrors = $null
@@ -444,7 +491,10 @@ function ConvertToAce {
                 # string is parsed in a consistent manner)
                 $Ast = [System.Management.Automation.Language.Parser]::ParseInput("fakecommand ${InputObject}", [ref] $Tokens, [ref] $ParseErrors)
                 $Nodes = $Ast.FindAll({ $args[0].Parent -is [System.Management.Automation.Language.CommandBaseAst]}, $false) | Select-Object -Skip 1
+$global:__nodes = $Nodes
 
+                $LastTokenSection = 0   # Adding this late to the game so we can use this instead of tracking flags and variable contents. Will eventually
+                                        # change all of the if logic to look at this thing.
                 for ($i = 0; $i -lt $Nodes.Count; $i++) {
 
                     $CurrentNodeText = AstToObj $Nodes[$i]
@@ -467,6 +517,7 @@ function ConvertToAce {
                             default { [System.Security.AccessControl.AceQualifier]::SystemAudit }
                         }
                         Write-Verbose "    -> AceQualifier = ${AceQualifier}"
+                        $LastTokenSection = 1
                     }
                     elseif ('SystemAudit' -eq $AceQualifier -and ([System.Security.AccessControl.AceFlags]::AuditFlags.value__ -band $AceFlags.value__) -eq 0) {
                         # At this point, Success, Failure (or SF) are not optional. This node must contain
@@ -499,6 +550,8 @@ function ConvertToAce {
                                 }
                             }
                         }
+
+                        $LastTokenSection = 2
                     }
                     elseif (0 -eq $AccessMask) {
                         # Figure out the AccessMask. First, is this numeric?
@@ -543,9 +596,11 @@ function ConvertToAce {
                                 $AccessMask = $AccessMask -band (-bnot [System.Security.AccessControl.FileSystemRights]::Synchronize) 
                             }
                         }
+
+                        $LastTokenSection = 3
                     }
-                    elseif (($AceFlags.value__ -band [System.Security.AccessControl.AceFlags]::InheritanceFlags) -eq 0) {
-                        
+                    elseif ($LastTokenSection -lt 4 -and ($AceFlags.value__ -band [System.Security.AccessControl.AceFlags]::InheritanceFlags) -eq 0) {  # -and (and everything after) can probably just go!
+
                         Write-Verbose "    -> testing for AceFlags"
                         # My first test case for a string version had a 'to' separating the rights and the AppliesTo. Now that
                         # I'm implementing it, I'm not sure I like that idea, but let's put it in for now. Should we have a
@@ -556,6 +611,10 @@ function ConvertToAce {
                             continue 
                         }
 
+                        $LastTokenSection = 4 # Set this even if flags aren't handled. If we can't get the inheritance flags from
+                                              # this node, we'll decrement the $i counter, then the object ace checking will come
+                                              # into play (and if that fails, the function will exit with an error)
+
                         if (($AppliesTo = $CurrentNodeText -as [Roe.AppliesTo])) {
                             $AceFlagsDefined = $true
                             Write-Verbose "    -> valid AceFlags found; before AceFlags: ${AceFlags}"
@@ -565,9 +624,23 @@ function ConvertToAce {
                             Write-Verbose "    -> after AceFlags: ${AceFlags}"
                         }
                         else {
-                            Write-Error "Unknown ACE flags: ${CurrentNodeText}"
-                            return
+                            #Write-Error "Unknown ACE flags: ${CurrentNodeText}"
+                            #return
+                            
+                            # This might be object ace stuff, so let the next loop iteration take care of this
+                            $i--
                         }
+
+                    }
+                    elseif ((($Guids = $CurrentNodeText -as [guid[]])).Count -eq 2) {
+
+                        $ObjectAceType = $Guids[0]
+                        $InheritedObjectAceType = $Guids[1]
+                        $LastTokenSection = 5
+                    }
+                    else {
+                        Write-Error "Unable to handle token while parsing ACE: ${CurrentNodeText}"
+                        return
                     }
                 }
 
@@ -655,14 +728,48 @@ function ConvertToAce {
                 continue
             }
 
-            New-Object System.Security.AccessControl.CommonAce (
+            $Arguments = New-Object System.Collections.ArrayList
+            # Both CommonAce and ObjectAce share the first 4 and last 2 parameters (ObjectAce gets three extra args in there)
+            $AceType = [System.Security.AccessControl.CommonAce]
+            $null = $Arguments.AddRange((
                 $AceFlags,
                 $AceQualifier,
                 $AccessMask,
-                $CurrentSid,
-                $false,
-                $null
-            ) | ForEach-Object {
+                $CurrentSid
+
+            ))
+
+            if ($null -ne $ObjectAceType -or $null -ne $InheritedObjectAceType) {
+                $AceType = [System.Security.AccessControl.ObjectAce]
+                [System.Security.AccessControl.ObjectAceFlags] $ObjectAceFlags = [System.Security.AccessControl.ObjectAceFlags]::None
+
+                if ($null -eq $ObjectAceType) {
+                    $ObjectAceType = [guid]::Empty
+                }
+                if ($null -eq $InheritedObjectAceType) {
+                    $InheritedObjectAceType = [guid]::Empty
+                }
+
+                if ($ObjectAceType -ne [guid]::Empty) {
+                    $ObjectAceFlags = $ObjectAceFlags -bor [System.Security.AccessControl.ObjectAceFlags]::ObjectAceTypePresent
+                }
+                if ($InheritedObjectAceType -ne [guid]::Empty) {
+                    $ObjectAceFlags = $ObjectAceFlags -bor [System.Security.AccessControl.ObjectAceFlags]::InheritedObjectAceTypePresent
+                }
+
+                $null = $Arguments.AddRange((
+                    $ObjectAceFlags,
+                    $ObjectAceType,
+                    $InheritedObjectAceType
+                ))
+            }
+
+            $null = $Arguments.AddRange((
+                $false,  # CallBack?   ( we don't support this )
+                $null    # opaque data ( we don't support this )
+            ))
+
+            New-Object $AceType $Arguments.ToArray() | ForEach-Object {
                 if ($WildcardString) {
                     $_ | Add-Member -NotePropertyName __WildcardString -NotePropertyValue $WildcardString
                 }
@@ -749,11 +856,11 @@ function NewCommonSecurityDescriptor {
         }
 
         foreach ($Ace in $ReferenceSD.DiscretionaryAcl) {
-            $NewSD | AddAce $Ace
+            $NewSD | AddAce $Ace -ErrorAction Stop
         }
 
         foreach ($Ace in $ReferenceSD.SystemAcl) {
-            $NewSD | AddAce $Ace
+            $NewSD | AddAce $Ace -ErrorAction Stop
         }
 
         return $NewSD
