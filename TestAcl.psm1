@@ -111,6 +111,10 @@ No wildcards are allowed for -RequiredAces.
             return
         }
 
+        $FinalResult = $true # Assume $true unless we find something bad
+        $MissingRequiredAces = New-Object System.Collections.ArrayList
+        $UnapprovedAccess = New-Object System.Collections.ArrayList
+
         # Process -RequiredAces first since -AllowedAces test requires ACLs to
         # be emptied out completely
         #
@@ -130,7 +134,22 @@ No wildcards are allowed for -RequiredAces.
             try {
                 $SD | AddAce $ReqAce -ErrorAction Stop
                 if ($StartingSddlForm -ne $SD.GetSddlForm('All')) {
-                    return $false
+                    $FinalResult = $false
+
+                    if (-not $Detailed) {
+                        # Break out of the foreach() loop to save time since -Detailed
+                        # status wasn't requested
+                        break
+                    }
+
+                    # -Detailed must have been specified
+                    Write-Verbose "Adding missing required ACE to list"
+                    $null = $MissingRequiredAces.Add($ReqAce)
+                    $SD = New-Object System.Security.AccessControl.CommonSecurityDescriptor (
+                        $SD.IsContainer,
+                        $SD.IsDS,
+                        $StartingSddlForm
+                    )
                 }
             }
             catch {
@@ -163,16 +182,36 @@ No wildcards are allowed for -RequiredAces.
 $global:__sd = $SD
         if ($AllowedAccessAcesSpecified -and $SD.DiscretionaryAcl.Count -gt 0) {
             Write-Verbose "  -> DACL still contains entries, so there must have been some access not specified in -AllowedAces present"
-            return $false
+            $FinalResult = $false
+            
+            if ($Detailed) {
+                foreach ($ExtraAce in $SD.DiscretionaryAcl) {
+                    $null = $UnapprovedAccess.Add($ExtraAce)
+                }
+            }
         }
 
         if ($AllowedAuditAcesSpecified -and $SD.SystemAcl.Count -gt 0) {
             Write-Verbose "  -> SACL still contains entries, so there must have been some access not specified in -AllowedAces present"
-            return $false
+            $FinalResult = $false
+
+            if ($Detailed) {
+                foreach ($ExtraAce in $SD.SystemAcl) {
+                    $null = $UnapprovedAccess.Add($ExtraAce)
+                }
+            }
         }
-        
-        # If we made it this far, we passed the test!
-        return $true
+
+        if ($Detailed) {
+            return [PSCustomObject] @{
+                Result = $FinalResult
+                ExtraAces = $UnapprovedAccess
+                MissingAces = $MissingRequiredAces
+            }
+        } 
+        else {
+            return $FinalResult
+        }
     }
 }
 
@@ -637,11 +676,11 @@ $global:__nodes = $Nodes
                         # it from any 'Deny' ACEs (unless it's FullControl). Because we don't want users
                         # to have to specify Synchronize manually, we're going to handle that, too
                         if ($AccessRightType -eq [System.Security.AccessControl.FileSystemRights]) {
-                            if ($AceQualifier -eq 'AccessAllowed' -or $null -eq $AceQualifier) {
+                            if ($AceQualifier -eq [System.Security.AccessControl.AceQualifier]::AccessAllowed -or $null -eq $AceQualifier) {
                                 Write-Verbose "Adding Synchronize right"
                                 $AccessMask = $AccessMask -bor [System.Security.AccessControl.FileSystemRights]::Synchronize
                             }
-                            elseif ($AceQualifier -eq 'AccessDenied' -and $AccessMask -ne [System.Security.AccessControl.FileSystemRights]::FullControl.value__) {
+                            elseif ($AceQualifier -eq [System.Security.AccessControl.AceQualifier]::AccessDenied -and $AccessMask -ne [System.Security.AccessControl.FileSystemRights]::FullControl.value__) {
                                 Write-Verbose "Removing Synchronize right"
                                 $AccessMask = $AccessMask -band (-bnot [System.Security.AccessControl.FileSystemRights]::Synchronize) 
                             }
@@ -859,8 +898,10 @@ function NewCommonSecurityDescriptor {
 
             $AccessRightType = $InputObject.AccessRightType
 
-            if ($Audit) {
-                Write-Warning "Should we test for presence of SACL??"
+            if ($Audit -and $Sddl -notmatch 'S\:') {  # This is a terrible way to test for SACL; but it'll have to work for now
+                #Write-Warning "Should we test for presence of SACL??"
+                Write-Warning "Audit ACE specified, but unable to detect SACL on security descriptor object being tested"
+                
             }
         }
         elseif (($Path = if ($InputObject -is [string]) { $InputObject } elseif ($null -ne $InputObject.PsPath) { $InputObject.PsPath })) {
@@ -868,7 +909,7 @@ function NewCommonSecurityDescriptor {
             Write-Verbose "Contains 'PsPath' property"
             # Try Get-Acl:
             try {
-                Get-Acl -ErrorAction Stop -Path $Path | & $MyInvocation.MyCommand -Audit:$Audit
+                Get-Acl -ErrorAction Stop -Path $Path -Audit:$Audit | & $MyInvocation.MyCommand -Audit:$Audit
             }
             catch {
                 Write-Error "Error while calling Get-Acl: ${_}"                    

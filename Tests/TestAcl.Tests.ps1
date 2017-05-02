@@ -327,10 +327,9 @@ Describe 'Convert ACEs' {
     Context 'Test invalid strings' {
         It 'Invalid string: <string>' -TestCases @{ String = 'Audit Everyone Modify' }, 
             @{ String = 'potato' }, 
-            @{ String = 'Allow Everyone Modify What are those?'} 
-            @{ String = 'Allow RegistryRights: RegistryRights: FullControl'}
-            @{ String = 'Dney * Write'}
-            -test {
+            @{ String = 'Allow Everyone Modify What are those?'},
+            @{ String = 'Allow RegistryRights: RegistryRights: FullControl'},
+            @{ String = 'Dney * Write'} -test {
             param([string] $String)        
 
             { $String | ConvertToAce -ErrorAction Stop } | Should Throw
@@ -366,6 +365,35 @@ Describe 'Test-Acl' {
         }
         It 'Works with FileInfo and DirectoryInfo objects' {
             { Get-Item C:\Windows | Test-Acl -ErrorAction Stop } | Should Not Throw
+        }
+    }
+
+    Context 'Inheritance and object flags on SDs that don''t support them' {
+        It '-RequiredAces works with inheritance flags set on ACEs when SD doesn''t support containers' {
+            $SD = New-Object System.Security.AccessControl.FileSecurity
+            $SD.SetSecurityDescriptorSddlForm('D:AI(A;;FA;;;BA)(A;ID;FA;;;SY)')
+
+            # RequiredAces tries to add ACEs, and if a SD doesn't support inheritance flags, they need to
+            # be removed. We don't want a user of the function to have to deal with that, though, so we'll
+            # have the helper functions do it internally
+            {
+                $SD | Test-Acl -RequiredAces '
+                    Allow Administrators, SYSTEM FullControl
+                ' -ErrorAction Stop
+            } | Should Not Throw
+        }
+        It '-RequiredAces works with object flags set on ACEs when SD doesn''t support them' {
+            $SD = New-Object System.Security.AccessControl.FileSecurity
+            $SD.SetSecurityDescriptorSddlForm('D:AI(A;;FA;;;BA)(A;ID;FA;;;SY)')
+
+            # RequiredAces tries to add ACEs, and if a SD doesn't support inheritance flags, they need to
+            # be removed. We don't want a user of the function to have to deal with that, though, so we'll
+            # have the helper functions do it internally
+            {
+                $SD | Test-Acl -RequiredAces "
+                    Allow Administrators, SYSTEM FullControl $([guid]::Empty),$([guid]::Empty)
+                " -ErrorAction Stop
+            } | Should Not Throw
         }
     }
 
@@ -443,7 +471,7 @@ Describe 'Test-Acl' {
             " | Should Be $true
         }
         It '-AllowedAces (Synchronize Right Manually Specified) fails when expected' {
-            $SD | Test-Acl -AllowedAces "
+            $Result = $SD | Test-Acl -AllowedAces "
                 'CREATOR OWNER' FullControl O, CC
                 SYSTEM FullControl
                 Administrators FullControl
@@ -451,7 +479,17 @@ Describe 'Test-Acl' {
                 'NT Service\TrustedInstaller' FullControl
                 'ALL APPLICATION PACKAGES' ReadAndExecute, Synchronize
                 'ALL RESTRICTED APPLICATION PACKAGES' ReadAndExecute, Synchronize
-            " -Detailed | Should Be 'ADD THIS LATER'
+            " -Detailed
+
+            $Result.Result | Should Be $false
+            $Result.ExtraAces | Should Be ([System.Security.AccessControl.CommonAce]::new(
+                'ObjectInherit, InheritOnly',
+                'AllowedAccess',
+                [System.Security.AccessControl.FileSystemRights]::FullControl,
+                'S-1-3-0',
+                $false,
+                $null
+            ))
         }
         It '-AllowedAces (GenericRights not translated with -NoGenericRightsTranslation switch)' {
             $SD | Test-Acl -AllowedAces "
