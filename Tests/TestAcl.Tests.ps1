@@ -131,10 +131,12 @@ Describe 'Convert ACEs' {
         It '<string>' @Params
     }
 
-    Context 'String -> File Audit ACE [Audit Failure Everyone RegistryRights: ReadKey Write, Delete AppliesTo SubKeys]'  {
+    Context 'String -> Registry Audit ACE [Audit Failure Everyone RegistryRights: ReadKey Write, Delete AppliesTo SubKeys]'  {
 
         $Params = @{
             TestCases = @{ String = 'Audit Failure Everyone ReadKey ChildContainers' },
+                @{ String = 'Audit Failure Everyone RegistryRights:ReadKey ChildContainers' },
+                @{ String = 'Audit Failure Everyone RegistryRights: ReadKey ChildContainers' },
                 @{String = 'Audit F Everyone ReadKey CC' },
                 @{String = 'Audit f *S-1-1-0 131097 SubKeys' },
                 @{String = 'Audit F S-1-1-0 ReadKey applies to SubKeys'  }
@@ -253,11 +255,19 @@ Describe 'Convert ACEs' {
     }
 
     It 'Can specify enumeration, which also changes default inheritance flags' {
-        'Audit F RegistryRights:FullControl' | ConvertToAce | Should Be ([System.Security.AccessControl.CommonAce]::new(
+        'Audit F Everyone RegistryRights:FullControl' | ConvertToAce | Should Be ([System.Security.AccessControl.CommonAce]::new(
             'FailedAccess, ContainerInherit',
             [System.Security.AccessControl.AceQualifier]::SystemAudit,
-            [RegistryRights]::FullControl,
-            'S-1-0-0',
+            [System.Security.AccessControl.RegistryRights]::FullControl,
+            'S-1-1-0',
+            $false,
+            $null
+        ))
+        'Audit F Everyone ActiveDirectoryRights:GenericAll' | ConvertToAce | Should Be ([System.Security.AccessControl.CommonAce]::new(
+            'FailedAccess, ContainerInherit',
+            [System.Security.AccessControl.AceQualifier]::SystemAudit,
+            [System.DirectoryServices.ActiveDirectoryRights]::GenericAll,
+            'S-1-1-0',
             $false,
             $null
         ))
@@ -315,7 +325,12 @@ Describe 'Convert ACEs' {
     }
 
     Context 'Test invalid strings' {
-        It 'Invalid string: <string>' -TestCases @{ String = 'Audit Everyone Modify' }, @{ String = 'potato' }, @{ String = 'Allow Everyone Modify What are those?'} -test {
+        It 'Invalid string: <string>' -TestCases @{ String = 'Audit Everyone Modify' }, 
+            @{ String = 'potato' }, 
+            @{ String = 'Allow Everyone Modify What are those?'} 
+            @{ String = 'Allow RegistryRights: RegistryRights: FullControl'}
+            @{ String = 'Dney * Write'}
+            -test {
             param([string] $String)        
 
             { $String | ConvertToAce -ErrorAction Stop } | Should Throw

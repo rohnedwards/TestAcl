@@ -464,7 +464,7 @@ function ConvertToAce {
 
         [System.Security.AccessControl.AceFlags] $AceFlags = [System.Security.AccessControl.AceFlags]::None   
         $AccessMask = 0
-        $ObjectAceType = $InheritedObjectAceType = $AceQualifier = $Sid = $null
+        $AccessRightType = $ObjectAceType = $InheritedObjectAceType = $AceQualifier = $Sid = $null
         $AceFlagsDefined = $false
 
         switch ($InputObject.GetType()) {
@@ -568,23 +568,62 @@ $global:__nodes = $Nodes
                         # Figure out the AccessMask. First, is this numeric?
                         if ($CurrentNodeText -as [int]) {
                             $AccessMask = $CurrentNodeText
+                            $LastTokenSection = 3
                             continue
                         }
                         
                         # Next, check to see if an enum type helper was specified
                         $PotentialEnumTypes = [System.Security.AccessControl.FileSystemRights], [System.Security.AccessControl.RegistryRights], [System.DirectoryServices.ActiveDirectoryRights]
-                        if ($CurrentNodeText[0] -match '^(?<type>[^\:]+)\:(?<therest>.*)') {
-                            $Type = $matches.type
-                            Write-Warning "Type searching doesn't work right now!!"
-                            
-                            $CurrentNodeText[0] = $matches.therest
+                        
+                        # A helper would look like this:
+                        # > Allow UserName Helper:Rights1, Rights2
+                        # > Allow UserName Helper: Rights1, Rights2
+                        # > Allow UserName Helper:Rights1
+                        $TestForHelper = if ($CurrentNodeText -is [array]) { # This fixes it so we can test regex against single string
+                            $CurrentNodeText[0]
                         }
+                        else {
+                            $CurrentNodeText
+                        }
+                        if ($TestForHelper -match '^(?<type>[^\:]+)\:(?<therest>.*)') {
+                            $Type = $matches.type
+                            
+                            # Let's try to find what the user specified:
+                            $AccessRightType = $PotentialEnumTypes | Where-Object {
+                                $_.FullName -eq $Type -or $_.Name -eq $Type
+                            }
 
-                        foreach ($AccessRightType in $PotentialEnumTypes) {
-                            if (($AccessMask = $CurrentNodeText -as $AccessRightType)) {
-                                break    
+                            if ($null -eq $AccessRightType) {
+                                Write-Error "Unknown access right type: ${Type}"
+                                return
+                            }
+                            
+                            if ([string]::IsNullOrEmpty($matches.therest)) {
+                                # Must have been a space separating the helper from the rights. Continue on, and
+                                # next iteration of the foreach() block will find the rights
+                                continue
+                            }
+                            elseif ($CurrentNodeText -is [array]) {
+                                $CurrentNodeText[0] = $matches.therest
+                            }
+                            else {
+                                $CurrentNodeText = $matches.therest
                             }
                         }
+
+                        if ($null -eq $AccessRightType) {
+                            Write-Verbose "Searching for first enumeration that matches access rights"
+                            foreach ($AccessRightType in $PotentialEnumTypes) {
+                                if (($AccessMask = $CurrentNodeText -as $AccessRightType)) {
+                                    break    
+                                }
+                            }
+                        }
+                        else {
+                            Write-Verbose "No searching for enumeration; using the one specified in string"
+                            $AccessMask = $CurrentNodeText -as $AccessRightType
+                        }
+                        Write-Verbose "  -> AccessRightType: ${AccessRightType}"
 
                         if ([int] $AccessMask -eq 0) {
                             Write-Error "Unable to determine access mask from '${CurrentNodeText}'"
@@ -663,6 +702,12 @@ $global:__nodes = $Nodes
                 # Test to see if any inheritance and propagation flags have been set (remember, they were optional). If not, set them for O CC CO
                 if (-not $AceFlagsDefined) {
                     $AceFlags = $AceFlags.value__ -bor ([System.Security.AccessControl.AceFlags] 'ObjectInherit, ContainerInherit').value__
+                }
+
+                # We need at least a principal and access mask, which would put the $LastTokenSection at 3
+                if ($LastTokenSection -lt 3) {
+                    Write-Error 'Must provide a principal and access mask'
+                    return
                 }
             }
 
