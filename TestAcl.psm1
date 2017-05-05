@@ -396,7 +396,7 @@ function AddAce {
         ))
 
         if ($Ace -is [System.Security.AccessControl.ObjectAce]) {
-            if ($SD.IsDS) {
+            if (-not $SecurityDescriptor.IsDS) {
                 Write-Warning "Can't add object ACE to security descriptor since it is not object aware"
             }
             else {
