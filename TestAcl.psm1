@@ -383,7 +383,7 @@ function AddAce {
 
         $InheritanceFlags = [System.Security.AccessControl.InheritanceFlags]::None
         $PropagationFlags = [System.Security.AccessControl.PropagationFlags]::None
-        if ($SD.IsContainer) {
+        if ($SecurityDescriptor.IsContainer) {
             $InheritanceFlags = $Ace.InheritanceFlags
             $PropagationFlags = $Ace.PropagationFlags
         }
