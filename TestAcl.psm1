@@ -89,7 +89,7 @@ No wildcards are allowed for -RequiredAces.
         # wasn't specified. If -ExactMatch is specified, however, the Test-Acl call would pass
         # since the two ACEs don't match exactly.
         [System.Security.AccessControl.QualifiedAce[]]
-        [Roe.TransformScriptAttribute({
+        [Roe.TransformScript({
             $_ | ConvertToAce -ErrorAction Stop
         })]
         $DisallowedAces,
@@ -207,9 +207,9 @@ If you test for -DisallowedAces 'Users Modify CC', then you should fail the test
 Simple AddAce/RemoveAce checks won't do here...
             #>
             try {
-#                $SD | AddAce $DisallowedAce -ErrorAction Stop
-                $SD | RemoveAce $DisallowedAce -ErrorAction Stop
-                if ($StartingSddlForm -ne $SD.GetSddlForm('All')) {
+                $BadACEs = $SD | FindAce $DisallowedAce
+                
+                if ($null -ne $BadACEs) {
                     $FinalResult = $false
 
                     if (-not $Detailed) {
@@ -221,13 +221,6 @@ Simple AddAce/RemoveAce checks won't do here...
                     # -Detailed must have been specified
                     Write-Verbose "Adding disallowed ACE to list"
                     $null = $PresentDisallowedAces.Add($DisallowedAce)
-                }
-                else { # Gotta reset the SD for the next test
-                    $SD = New-Object System.Security.AccessControl.CommonSecurityDescriptor (
-                        $SD.IsContainer,
-                        $SD.IsDS,
-                        $StartingSddlForm
-                    )
                 }
             }
             catch {
@@ -404,6 +397,75 @@ function AddAce {
     }
 }
 
+function FindAce {
+<#
+Helper function that takes a reference ACE and finds any ACEs with overlap for the reference ACE (unless ExactMatch is specified, in which case it finds ACEs that match the reference ACE exactly)
+#>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory, ValueFromPipeline)]
+        [System.Security.AccessControl.CommonSecurityDescriptor] $SecurityDescriptor,
+        [Parameter(Mandatory, Position=0)]
+        [System.Security.AccessControl.QualifiedAce] $Ace,
+        [switch] $ExactMatch
+    )
+
+    process {
+
+        $GenericRightsDict = $SecurityDescriptor.__GenericRightsDict
+
+        $Acl = if ($Ace.AuditFlags -eq [System.Security.AccessControl.AuditFlags]::None) {
+            Write-Verbose '  -> Access ACE'
+            $SecurityDescriptor.DiscretionaryAcl
+        }
+        else {
+            Write-Verbose '  -> Audit ACE'
+            $SecurityDescriptor.SystemAcl
+        }
+        
+        if ($null -ne $Ace.__WildcardString) {
+            Write-Verbose "RemoveAce: Wildcard ACE found!"
+            $NonWildcardAce = $Ace.Copy()  # Un-PSObjectify this so we don't go into infinite loop
+            
+            foreach ($CurrentSid in $Acl.SecurityIdentifier) {
+                try {
+                    $Principal = $CurrentSid.Translate([System.Security.Principal.NTAccount])
+                    if ($Principal -like $Ace.__WildcardString) {
+                        $NonWildcardAce.SecurityIdentifier = $CurrentSid
+                        $SecurityDescriptor | FindAce $NonWildcardAce
+                    }
+                    else {
+                        Write-Verbose "  -> '${Principal}' name doesn't match wildcard ($($Ace.__WildcardString))"
+                    }
+                }
+                catch {
+                    Write-Warning "Error while processing wildcard ACE for '${CurrentSid}': ${_}"
+                }
+            }
+            return # All the work's been done; we don't want to drop out of this block/
+        }
+
+        if ($Ace -is [System.Security.AccessControl.ObjectAce] -or $SD.IsDS) {
+            throw "Object ACEs and DS SDs aren't supported yet!"
+        }
+
+        $AceAppliesTo = FlagsToAppliesTo $Ace
+        $Acl | Where-Object {
+           $AccessMaskOverlap = $_.AccessMask -band $Ace.AccessMask
+           $AppliesTo = FlagsToAppliesTo $_
+           $AppliesToOverlap = $AppliesTo.value__ -band $AceAppliesTo
+
+           $_.AceQualifier -eq $Ace.AceQualifier -and
+           $_.SecurityIdentifier -eq $Ace.SecurityIdentifier -and
+           $AccessMaskOverlap -ne 0 -and
+           ($ExactMatch -eq $false -or $AccessMaskOverlap -eq $Ace.AccessMask) -and
+           $AppliesToOverlap -gt 0 -and
+           ($ExactMatch -eq $false -or $AppliesToOverlap -eq $AceAppliesTo)
+
+        }
+
+    }
+}
 function RemoveAce {
 
     [CmdletBinding()]
@@ -1042,25 +1104,55 @@ function NewCommonSecurityDescriptor {
     }
 }
 
+function FlagsToAppliesTo {
+<#
+Returns an AppliesTo enum from a CommonAce's inheritance and propagation flags. Usefule for FindAce since there's no 0 value for the AppliesTo enum
+#>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory, ValueFromPipeline)]
+        [System.Security.AccessControl.QualifiedAce] $Ace
+    )
+
+    process {
+        $Return = [Roe.AppliesTo] 0
+
+        if ($Ace.InheritanceFlags.value__ -band [System.Security.AccessControl.InheritanceFlags]::ObjectInherit.value__) {
+            $Return = $Return.value__ -bor [Roe.AppliesTo]::ChildObjects.value__
+        }
+        if ($Ace.InheritanceFlags.value__ -band [System.Security.AccessControl.InheritanceFlags]::ContainerInherit.value__) {
+            $Return = $Return.value__ -bor [Roe.AppliesTo]::ChildContainers.value__
+        }
+
+        if (-not ($Ace.PropagationFlags.value__ -band [System.Security.AccessControl.PropagationFlags]::InheritOnly.value__)) {
+            $Return = $Return.value__ -bor [Roe.AppliesTo]::Object.value__
+        }
+        if ($Ace.PropagationFlags.value__ -band [System.Security.AccessControl.PropagationFlags]::NoPropagateInherit) {
+            Write-Warning "NoPropagateInherit not supported yet!"
+        }
+        return ($Return -as [Roe.AppliesTo])
+    }
+}
+
 Add-Type @'
     using System;
     namespace Roe {
         [Flags()]
         public enum AppliesTo {
-            ChildObjects = 1,
             CO = 1,
             Files = 1,
-            ChildContainers = 2,
+            ChildObjects = 1,
             CC = 2,
             SubFolders = 2,
             ChildKeys = 2,
             SubKeys = 2,
-            Object = 8,
+            ChildContainers = 2,
             ThisFile = 8,
             ThisFolder = 8,
             ThisKey = 8,
             This = 8,
-            O = 8
+            O = 8,
+            Object = 8
         }
     }
 '@
