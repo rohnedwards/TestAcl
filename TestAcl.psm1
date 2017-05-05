@@ -222,6 +222,7 @@ No wildcards are allowed for -RequiredAces.
         # be slightly more effecient to wait until normal ACEs have been removed. Time will
         # tell (this would probably be more noticeable on AD objects)
         $AllowedAccessAcesSpecified = $AllowedAuditAcesSpecified = $false
+        $DenyAcePresent = $false   # Only used if there are ACEs left after going through all $AllowedAces
         foreach ($AllowedAce in $AllowedAces) {
             Write-Debug "Removing ACE"
             try {
@@ -236,11 +237,25 @@ No wildcards are allowed for -RequiredAces.
                 $AllowedAuditAcesSpecified = $true
             }
             else {
+                if ($AllowedAce.AceQualifier -eq [System.Security.AccessControl.AceQualifier]::AccessDenied) {
+                    $DenyAcePresent = $true
+                }
                 $AllowedAccessAcesSpecified = $true
             }
         }
+            
+        if ($false -eq $DenyAcePresent -and $false -eq $ExactMatch) {
+            # Try to remove all Deny ACEs since they are ignored by default if the -AllowedAces
+            # collection doesn't contain one
+            foreach ($DenyAce in ($SD.DiscretionaryAcl | Where-Object { $_.AceQualifier -eq [System.Security.AccessControl.AceQualifier]::AccessDenied })) {
+                Write-Verbose "  -> Removing Deny ACE"
+                $SD | RemoveAce $DenyAce
+            }
+        }
+        
         if ($AllowedAccessAcesSpecified -and $SD.DiscretionaryAcl.Count -gt 0) {
             Write-Verbose "  -> DACL still contains entries, so there must have been some access not specified in -AllowedAces present"
+            
             $FinalResult = $false
             
             if ($Detailed) {
