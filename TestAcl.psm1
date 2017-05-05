@@ -195,17 +195,6 @@ No wildcards are allowed for -RequiredAces.
             }
         }
         foreach ($DisallowedAce in $DisallowedAces) {
-            <#
-This isn't that clear cut. Imagine this scenario:
-
-Users Modify      O
-Users FullControl    CC
-
-If you test for -DisallowedAces 'Users FullControl O', then you should pass the test
-If you test for -DisallowedAces 'Users Modify CC', then you should fail the test.
-
-Simple AddAce/RemoveAce checks won't do here...
-            #>
             try {
                 $BadACEs = $SD | FindAce $DisallowedAce
                 
@@ -250,7 +239,6 @@ Simple AddAce/RemoveAce checks won't do here...
                 $AllowedAccessAcesSpecified = $true
             }
         }
-$global:__sd = $SD
         if ($AllowedAccessAcesSpecified -and $SD.DiscretionaryAcl.Count -gt 0) {
             Write-Verbose "  -> DACL still contains entries, so there must have been some access not specified in -AllowedAces present"
             $FinalResult = $false
@@ -457,11 +445,14 @@ Helper function that takes a reference ACE and finds any ACEs with overlap for t
 
            $_.AceQualifier -eq $Ace.AceQualifier -and
            $_.SecurityIdentifier -eq $Ace.SecurityIdentifier -and
-           $AccessMaskOverlap -ne 0 -and
-           ($ExactMatch -eq $false -or $AccessMaskOverlap -eq $Ace.AccessMask) -and
+           $AccessMaskOverlap -eq $Ace.AccessMask -and
            $AppliesToOverlap -gt 0 -and
            ($ExactMatch -eq $false -or $AppliesToOverlap -eq $AceAppliesTo)
 
+<#
+           $AccessMaskOverlap -ne 0 -and
+           ($ExactMatch -eq $false -or $AccessMaskOverlap -eq $Ace.AccessMask) -and
+#>
         }
 
     }
@@ -1115,17 +1106,17 @@ Returns an AppliesTo enum from a CommonAce's inheritance and propagation flags. 
     )
 
     process {
-        $Return = [Roe.AppliesTo] 0
+        $Return = 0
 
         if ($Ace.InheritanceFlags.value__ -band [System.Security.AccessControl.InheritanceFlags]::ObjectInherit.value__) {
-            $Return = $Return.value__ -bor [Roe.AppliesTo]::ChildObjects.value__
+            $Return = $Return -bor [Roe.AppliesTo]::ChildObjects.value__
         }
         if ($Ace.InheritanceFlags.value__ -band [System.Security.AccessControl.InheritanceFlags]::ContainerInherit.value__) {
-            $Return = $Return.value__ -bor [Roe.AppliesTo]::ChildContainers.value__
+            $Return = $Return -bor [Roe.AppliesTo]::ChildContainers.value__
         }
 
         if (-not ($Ace.PropagationFlags.value__ -band [System.Security.AccessControl.PropagationFlags]::InheritOnly.value__)) {
-            $Return = $Return.value__ -bor [Roe.AppliesTo]::Object.value__
+            $Return = $Return -bor [Roe.AppliesTo]::Object.value__
         }
         if ($Ace.PropagationFlags.value__ -band [System.Security.AccessControl.PropagationFlags]::NoPropagateInherit) {
             Write-Warning "NoPropagateInherit not supported yet!"

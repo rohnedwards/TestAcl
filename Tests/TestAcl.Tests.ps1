@@ -964,6 +964,17 @@ Describe 'FindAce' {
         $Ace = "Allow Administrators FullControl O" | ConvertToAce
         
         $FoundAces = @($SD | FindAce $Ace)
+        $FoundAces.Count | Should Be 0
+
+        $Ace = "Allow Administrators Modify O" | ConvertToAce
+        
+        $FoundAces = @($SD | FindAce $Ace)
+        $FoundAces.Count | Should Be 1
+    }
+    It 'Simple Non-Exact Search' {
+        $Ace = "Allow Administrators FullControl" | ConvertToAce
+        
+        $FoundAces = @($SD | FindAce $Ace)
         $FoundAces.Count | Should Be 1
     }
 
