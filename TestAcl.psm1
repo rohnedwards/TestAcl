@@ -381,31 +381,19 @@ function AddAce {
             $Acl = $SecurityDescriptor.SystemAcl
         }
 
-        $InheritanceFlags = [System.Security.AccessControl.InheritanceFlags]::None
-        $PropagationFlags = [System.Security.AccessControl.PropagationFlags]::None
-        if ($SD.IsContainer) {
-            $InheritanceFlags = $Ace.InheritanceFlags
-            $PropagationFlags = $Ace.PropagationFlags
-        }
-
         $null = $Arguments.AddRange((
             $Ace.SecurityIdentifier,
             (ToAccessMask $Ace.AccessMask -GenericRights $GenericRightsDict),
-            $InheritanceFlags,
-            $PropagationFlags
+            $Ace.InheritanceFlags,
+            $Ace.PropagationFlags
         ))
 
         if ($Ace -is [System.Security.AccessControl.ObjectAce]) {
-            if ($SD.IsDS) {
-                Write-Warning "Can't add object ACE to security descriptor since it is not object aware"
-            }
-            else {
-                $null = $Arguments.AddRange((
-                    $Ace.ObjectAceFlags,
-                    $Ace.ObjectAceType,
-                    $Ace.InheritedObjectAceType
-                ))
-            }
+            $null = $Arguments.AddRange((
+                $Ace.ObjectAceFlags,
+                $Ace.ObjectAceType,
+                $Ace.InheritedObjectAceType
+            ))
         }
 
         $null = $Acl.$MethodName.Invoke($Arguments.ToArray())
