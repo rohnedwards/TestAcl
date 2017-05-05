@@ -78,6 +78,22 @@ No wildcards are allowed for -RequiredAces.
         })]
         $AllowedAces,
         [Parameter()]
+        # A list of ACEs that cannot be present in the security descriptor. If -DisallowedAces
+        # is provided, then the security descriptor MUST NOT contain any access defined in the
+        # described ACEs collection.
+        #
+        # If the -ExactMatch switch is also provided, then any ACEs defined in -DisallowedAces
+        # must be present in the EXACT form they are defined in order for the test to fail,
+        # e.g., 'Allow Users Read O, CC, CO' would fail the Test-Acl test if it was called
+        # against an SD that had an ACE that granted 'Users FullControl CO' and -ExactMatch
+        # wasn't specified. If -ExactMatch is specified, however, the Test-Acl call would pass
+        # since the two ACEs don't match exactly.
+        [System.Security.AccessControl.QualifiedAce[]]
+        [Roe.TransformScriptAttribute({
+            $_ | ConvertToAce -ErrorAction Stop
+        })]
+        $DisallowedAces,
+        [Parameter()]
         # A list of ACEs that MUST be present in the security descriptor. The security
         # descriptor is still allowed to contain ACEs that aren't listed in the
         # -RequiredAces collection. 
@@ -134,6 +150,7 @@ No wildcards are allowed for -RequiredAces.
         $FinalResult = $true # Assume $true unless we find something bad
         $MissingRequiredAces = New-Object System.Collections.ArrayList
         $UnapprovedAccess = New-Object System.Collections.ArrayList
+        $PresentDisallowedAces = New-Object System.Collections.ArrayList
 
         # Process -RequiredAces first since -AllowedAces test requires ACLs to
         # be emptied out completely
@@ -165,6 +182,47 @@ No wildcards are allowed for -RequiredAces.
                     # -Detailed must have been specified
                     Write-Verbose "Adding missing required ACE to list"
                     $null = $MissingRequiredAces.Add($ReqAce)
+                    $SD = New-Object System.Security.AccessControl.CommonSecurityDescriptor (
+                        $SD.IsContainer,
+                        $SD.IsDS,
+                        $StartingSddlForm
+                    )
+                }
+            }
+            catch {
+                Write-Error $_
+                return
+            }
+        }
+        foreach ($DisallowedAce in $DisallowedAces) {
+            <#
+This isn't that clear cut. Imagine this scenario:
+
+Users Modify      O
+Users FullControl    CC
+
+If you test for -DisallowedAces 'Users FullControl O', then you should pass the test
+If you test for -DisallowedAces 'Users Modify CC', then you should fail the test.
+
+Simple AddAce/RemoveAce checks won't do here...
+            #>
+            try {
+#                $SD | AddAce $DisallowedAce -ErrorAction Stop
+                $SD | RemoveAce $DisallowedAce -ErrorAction Stop
+                if ($StartingSddlForm -ne $SD.GetSddlForm('All')) {
+                    $FinalResult = $false
+
+                    if (-not $Detailed) {
+                        # Break out of the foreach() loop to save time since -Detailed
+                        # status wasn't requested
+                        break
+                    }
+                    
+                    # -Detailed must have been specified
+                    Write-Verbose "Adding disallowed ACE to list"
+                    $null = $PresentDisallowedAces.Add($DisallowedAce)
+                }
+                else { # Gotta reset the SD for the next test
                     $SD = New-Object System.Security.AccessControl.CommonSecurityDescriptor (
                         $SD.IsContainer,
                         $SD.IsDS,
@@ -227,6 +285,7 @@ $global:__sd = $SD
                 Result = $FinalResult
                 ExtraAces = $UnapprovedAccess
                 MissingAces = $MissingRequiredAces
+                DisallowedAces = $PresentDisallowedAces
             }
         } 
         else {
