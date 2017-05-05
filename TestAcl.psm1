@@ -10,20 +10,37 @@ process, especially considering all of the different types of securable objects 
 
 Test-Acl attempts to simplify this process. After providing an -InputObject, which can be either the
 securable object, e.g., file, folder, registry key, or a security descriptor object itself, you also provide
-an -AllowedAces value and/or a -RequiredAces value. 
+an -AllowedAces value, a -DisallowedAces value, and/or a -RequiredAces value. 
 
-The -AllowedAces can be thought of as a whitelist: any
-access that these ACEs grant are allowed to be present in the SD, even if they don't match exactly. For example,
-you can specify that an ACE granting Users 'Read, Write' to a folder, subfolders, and files is allowed, but the
-SD you're testing may only grant Users 'Read' to subfolders. This less-permissive ACE would not cause the test 
-(to fail well, unless the -ExactMatch switch is also specified). If, however, the SD had an ACE granting Users
-'Read, Delete', the test would fail because 'Delete' isn't contained in the -AllowedAces.
+AllowedAces
+-----------
+The -AllowedAces can be thought of as a whitelist: any access that these ACEs grant are allowed to be present 
+in the SD, even if they don't match exactly. For example, you can specify that an ACE granting Users 'Read, 
+Write' to a folder, subfolders, and files is allowed, but the SD you're testing may only grant Users 'Read' to 
+subfolders. This less-permissive ACE would not cause the test (to fail well, unless the -ExactMatch switch is 
+also specified). If, however, the SD had an ACE granting Users 'Read, Delete', the test would fail because 
+'Delete' isn't contained in the -AllowedAces.
 
 The -AllowedAces string formats can also contain wildcards for principals. This is useful for when you want to
 allow certain rights to be allowed, even when you don't know what principals they may be granted to. For example,
 maybe you're only looking for objects where users have more than Read access. Specifying the following in the
 -AllowedAces would take care of that: Allow * Read
 
+DisallowedAces
+--------------
+The -DisallowedAces parameter can be thought of as a blacklist: any overlap in ACE principal/accessmask/flags
+defined in this parameter and ACEs present on the securable object will cause the test to fail. For example,
+assume the following SD:
+
+Deny   Guests    FullControl
+Allow  Everyone  FullControl
+
+If -DisallowedAces is passed 'Allow Everyone Read', the test would fail because the read access is contained
+in the SD's actual access.
+
+
+RequiredAces
+------------
 The -RequiredAces is a list of ACEs that MUST be specified. If more access/audit rights (or inheritance flags)
 are granted, that's OK. For example, assume you specify the following -RequireAces list:
 

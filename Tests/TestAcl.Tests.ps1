@@ -397,6 +397,43 @@ Describe 'Test-Acl' {
         }
     }
 
+    Context '-AllowedAces Deny ACE handling' {
+
+        $SD = New-Object System.Security.AccessControl.DirectorySecurity
+        $SD.SetSecurityDescriptorSddlForm('D:(D;OICI;DCLCRPCR;;;BU)(D;OICI;FA;;;BG)(A;OICI;FA;;;BA)(A;OICI;FR;;;BU)')
+        <#
+            Deny   Users           Write        O, CC, CO
+            Deny   Guests          FullControl  O, CC, CO
+            Allow  Administrators  FullControl  O, CC, CO
+            Allow  Users           Read         O, CC, CO
+        #>
+        
+        It 'Deny ACEs ignored by default' {
+
+            $SD | Test-Acl -AllowedAces '
+                Administrators FullControl
+                Users Read
+            ' | Should Be $true
+        }
+
+        It 'Deny ACEs not ignored if one is defined in -AllowedAces' {
+            $Result = $SD | Test-Acl -AllowedAces '
+                Administrators FullControl
+                Users Read
+                Deny Guests FullControl
+            ' -Detailed
+
+            $Result.Result | Should Be $false
+            $Result.ExtraAces | Should Be ([System.Security.AccessControl.CommonAce]::new('ObjectInherit, ContainerInherit', [System.Security.AccessControl.AceQualifier]::AccessAllowed, 278, 'S-1-5-32-545', $false, $null))
+        }
+
+        It 'Deny ACEs not ignored if option is set' {
+            $SD | Test-Acl -AllowedAces '
+                Administrators FullControl
+                Users Read
+            ' -OptionToBeDetermined | Should Be $false
+        }
+    }
     Context '-AllowedAces' {
         $SD = Get-Acl C:\Windows
         It 'Passes with SD is played back' {
@@ -406,6 +443,34 @@ Describe 'Test-Acl' {
         It 'Fails with SD -1 is played back' {
             Get-Item C:\Windows | Test-Acl -AllowedAces ($SD.Access | select -skip 1) |  Should Be $false
         }
+        
+        It 'Non-AD container' {
+            $SD = New-Object System.Security.AccessControl.DirectorySecurity
+            $SD.SetSecurityDescriptorSddlForm('D:(D;OICI;DCLCRPCR;;;BU)(D;OICI;FA;;;BG)(A;OICI;FA;;;BA)(A;OICI;FR;;;BU)')
+            <#
+                Deny   Users           Write        O, CC, CO
+                Deny   Guests          FullControl  O, CC, CO
+                Allow  Administrators  FullControl  O, CC, CO
+                Allow  Users           Read         O, CC, CO
+            #>
+        
+            $SD | Test-Acl -AllowedAces '* FullControl' | Should Be $true
+        }        
+        It 'AD container' {
+        }        
+        It 'Leaf object' {
+            $SD = New-Object System.Security.AccessControl.FileSecurity
+            $SD.SetSecurityDescriptorSddlForm('D:(D;;DCLCRPCR;;;BU)(D;;FA;;;BG)(A;;FA;;;BA)(A;;FR;;;BU)')
+            <#
+                Deny   Users           Write        O
+                Deny   Guests          FullControl  O
+                Allow  Administrators  FullControl  O
+                Allow  Users           Read         O
+            #>
+        
+            # The converted ACE below will have ACE flags, but Test-Acl should handle it just fine
+            $SD | Test-Acl -AllowedAces '* FullControl' | Should Be $true
+        }        
     }
     Context '-RequiredAces' {
         It 'RequiredTest' {
@@ -414,12 +479,35 @@ Describe 'Test-Acl' {
                 Users ReadAndExecute, Synchronize Object   # This Synchronize shouldnt be necessary
             '
         }
-    }
 
+        It 'Non-AD container' {
+        }        
+        It 'AD container' {
+        }        
+        It 'Leaf object' {
+        }        
+    }
+    Context '-DisallowedAces' {
+        It 'Non-AD container' {
+        }        
+        It 'AD container' {
+        }        
+        It 'Leaf object' {
+        }        
+    }
+    Context 'AllowedAces, DisallowedAces, RequiredAces together' {
+        
+        It 'Non-AD container' {
+        }        
+        It 'AD container' {
+        }        
+        It 'Leaf object' {
+        }        
+    }
     Context 'GenericRights on DirectorySecurity' {
         $SD = New-Object System.Security.AccessControl.DirectorySecurity
         $SD.SetSecurityDescriptorSddlForm('O:S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464G:S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464D:PAI(A;OICIIO;GA;;;CO)(A;OICIIO;GA;;;SY)(A;;0x1301bf;;;SY)(A;OICIIO;GA;;;BA)(A;;0x1301bf;;;BA)(A;OICIIO;GXGR;;;BU)(A;;0x1200a9;;;BU)(A;CIIO;GA;;;S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464)(A;;FA;;;S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464)(A;;0x1200a9;;;AC)(A;OICIIO;GXGR;;;AC)(A;;0x1200a9;;;S-1-15-2-2)(A;OICIIO;GXGR;;;S-1-15-2-2)')
-        
+
         It '-AllowedAces (Synchronize Right Manually Specified)' {
             $SD | Test-Acl -AllowedAces "
                 'CREATOR OWNER' FullControl
@@ -540,5 +628,435 @@ Describe 'Test-Acl' {
         $ReqAces = [System.Security.AccessControl.FileSystemAccessRule]::new('SYSTEM', 'Modify', 'ObjectInherit, ContainerInherit', 'InheritOnly', 'Allow'), 
                     [System.Security.AccessControl.FileSystemAccessRule]::new('Users', 'ReadAndExecute', 'None', 'None', 'Allow')
         Get-Item C:\Windows | Test-Acl -RequiredAces $ReqAces | Should Be $true
+    }
+}
+Describe 'Test-Acl' {
+
+    Context 'Works with DirectorySecurity objects (Folders)' {
+        <#
+           This is a default C:\Windows SD, with an added 'Deny' for 'Guests', and two audit ACEs
+
+           The default Windows folder has generic rights mixed in with file/folder specific rights. The
+           security descriptor looks like this:
+
+           Deny    Guests                    FullControl      O, CC, CO
+           Allow  'CREATOR OWNER'            268435456           CC, CO   # This is GenericAll
+           Allow  SYSTEM                     Modify           O
+           Allow  SYSTEM                     268435456           CC, CO   # GenericAll
+           Allow  Administrators             Modify           O
+           Allow  Administrators             268435456           CC, CO   # GenericAll
+           Allow  Users                      ReadAndExecute   O
+           Allow  Users                      -1610612736         CC, CO   # GenericRead, GenericExecute
+           Allow  TrustedInstaller           FullControl      O
+           Allow  TrustedInstaller           268435456           CC, CO   # GenericAll
+           Allow  'All Application Packages' -1610612736         CC, CO   # GenericRead, GenericExecute
+           Allow  'All Application Packages' ReadAndExecute   O
+           Allow  'All Restricted Application Packages' -1610612736         CC, CO   # GenericRead, GenericExecute
+           Allow  'All Restricted Application Packages' ReadAndExecute   O
+
+           Audit  S   Everyone                Delete, DeleteSubdirectoriesAndFiles  O, CC, CO
+           Audit   F  Everyone                FullControl                           O, CC, CO
+           Audit   F  Guests                  268435456                             O, CC, CO  # GenericAll
+        #>
+        $SD = New-Object System.Security.AccessControl.DirectorySecurity
+        $SD.SetSecurityDescriptorSddlForm('D:PAI(D;OICI;FA;;;BG)(A;OICIIO;GA;;;CO)(A;;0x1301bf;;;SY)(A;OICIIO;GA;;;SY)(A;;0x1301bf;;;BA)(A;OICIIO;GA;;;BA)(A;;0x1200a9;;;BU)(A;OICIIO;GXGR;;;BU)(A;;FA;;;S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464)(A;CIIO;GA;;;S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464)(A;OICIIO;GXGR;;;AC)(A;;0x1200a9;;;AC)(A;OICIIO;GXGR;;;S-1-15-2-2)(A;;0x1200a9;;;S-1-15-2-2)S:(AU;OICISA;DTSD;;;WD)(AU;OICIFA;FA;;;WD)(AU;OICIFA;GA;;;BG)')
+
+        It '-AllowedAces Translates GenericRights and Ignores Audit/Deny ACEs when -ExactMatch Not Used and Audit and Deny ACEs Not Present' {
+            $SD | Test-Acl -AllowedAces "
+                Allow 'CREATOR OWNER', SYSTEM, Administrators, 'NT SERVICE\TrustedInstaller' FullControl
+                Allow * ReadAndExecute
+            " | Should Be $true
+        }
+        It '-AllowedAces Does Not Ignore Audit/Deny ACEs When They Are Present in Parameter' {
+            $Result = $SD | Test-Acl -AllowedAces "
+                Deny     S-1-2-3-4  FullControl    # This is just a fake placeholder
+                Allow    'CREATOR OWNER', SYSTEM, Administrators, 'NT SERVICE\TrustedInstaller' FullControl
+                Allow    * ReadAndExecute
+                Audit F  S-1-2-3-4 FullControl     # This is just a fake placeholder
+            " -Detailed
+
+            $Result.Result | Should Be $false
+            $ExpectedExtraAces = '
+                Deny       Guests                  FullControl                           O, CC, CO
+                Audit  S   Everyone                Delete, DeleteSubdirectoriesAndFiles  O, CC, CO
+                Audit   F  Everyone                FullControl                           O, CC, CO
+                Audit   F  Guests                  FullControl                           O, CC, CO 
+            ' | ConvertToAce
+            $Result.ExtraAces.Count | Should Be $ExpectedExtraAces.Count
+            foreach ($ExtraAce in $Result.ExtraAces) {
+                $ExtraAce -in $ExpectedExtraAces | Should Be $true
+            }
+        }
+        It '-AllowedAces Does Not Translate Generic Rights And Does Not Ignore Audit/Deny ACEs When -ExactMach is Used' {
+            $Result = $SD | Test-Acl -AllowedAces "
+                Allow    'CREATOR OWNER', SYSTEM, Administrators, 'NT SERVICE\TrustedInstaller' FullControl
+                Allow    * ReadAndExecute
+            " -Detailed -ExactMatch
+
+            $Result.Result | Should Be $false
+            $ExpectedExtraAces = '
+                Deny       Guests                  FullControl                           O, CC, CO
+                Audit  S   Everyone                Delete, DeleteSubdirectoriesAndFiles  O, CC, CO
+                Audit   F  Everyone                FullControl                           O, CC, CO
+                Audit   F  Guests                  268435456                             O, CC, CO   # GenericAll
+            ' | ConvertToAce
+            $Result.ExtraAces.Count | Should Be $ExpectedExtraAces.Count
+            foreach ($ExtraAce in $Result.ExtraAces) {
+                $ExtraAce -in $ExpectedExtraAces | Should Be $true
+            }
+        }
+        It '-RequiredAces Works With Different Inheritance/PropagationFlags' {
+            $SD | Test-Acl -RequiredAces "
+                Deny Guests FullControl
+            " | Should Be $true
+
+            $SD | Test-Acl -RequiredAces "
+                Allow Administrators FullControl CC, CO
+            " | Should Be $true
+
+            $SD | Test-Acl -RequiredAces "
+                Allow Administrators FullControl
+            " | Should Be $false   # Remember, Admins only have 'Modify' on the O
+
+            $SD | Test-Acl -RequiredAces "
+                Audit S  Everyone  Delete, DeleteSubdirectoriesAndFiles
+            " | Should Be $true
+        }
+
+        It 'Figure Out How To Handle Issue With .NET SD (Read Notes in Test)' {
+            $SD | Test-Acl -RequiredAces "
+                Allow Administrators Modify     # This causes a failure right now b/c AddAccess() adds InheritanceFlags for the ACE that granted Modify to the Object only. I'd ideally like this to work, but I don't want to implement the AddAce() functionality
+                Audit S Everyone Delete
+                Audit F Everyone FullControl
+                Audit F Guests FullControl
+            " | Should Be $true
+            
+            $SD | Test-Acl -RequiredAces "
+                Audit SF  Everyone  Delete, DeleteSubdirectoriesAndFiles
+            " | Should Be $true   # This is currently failing, but it should work because that's the effective rights
+        }
+    
+        It '-DisallowedAces works as expected' {
+            $SD | Test-Acl -DisallowedAces "
+                Everyone Read
+            " | Should Be $true
+        
+            $SD | Test-Acl -DisallowedAces "
+                Users Read
+            " | Should Be $false
+        }
+        It '-DisallowedAces works with wildcards' {
+            $SD | Test-Acl -DisallowedAces "
+                Everyone *
+            " | Should Be $true
+
+            # No one should have FullControl on the folder (except TrustedInstaller)
+            $Result = $SD | Test-Acl -DisallowedAces "
+                Allow * FullControl O
+            " -Detailed
+            $Result.DisallowedAces.Count | Should Be 1
+            $Result.DisallowedAces | Should Be ('Allow "NT Service\TrustedInstaller" FullControl O' | ConvertToAce)
+        }
+
+        It '-AllowedAces, -DisallowedAces, -RequiredAces Can Work Together' {
+            $SD | Test-Acl -AllowedAces "
+                Allow    'CREATOR OWNER', SYSTEM, Administrators, 'NT SERVICE\TrustedInstaller' FullControl
+                Allow    * ReadAndExecute
+            " -RequiredAces "
+                Deny Guests FullControl
+                Audit F Everyone FullControl
+            " -DisallowedAces "
+                Allow Guests Read
+            "
+        }
+    }
+
+    Context 'Works with FileSecurity objects (Files)' {
+        <#
+           This is a default C:\Windows SD, with an added 'Deny' for 'Guests', and two audit ACEs, but
+           with all inheritance flags removed.
+
+           The default Windows folder has generic rights mixed in with file/folder specific rights. The
+           security descriptor looks like this:
+
+           Deny    Guests                    FullControl      O
+           Allow  SYSTEM                     Modify           O
+           Allow  Administrators             Modify           O
+           Allow  Users                      ReadAndExecute   O
+           Allow  TrustedInstaller           FullControl      O
+           Allow  'All Application Packages' ReadAndExecute   O
+           Allow  'All Restricted Application Packages' ReadAndExecute   O
+
+           Audit  S   Everyone                Delete, DeleteSubdirectoriesAndFiles  O
+           Audit   F  Everyone                FullControl                           O
+           Audit   F  Guests                  268435456                             O  # GenericAll
+        #>
+        $SD = New-Object System.Security.AccessControl.FileSecurity
+        $SD.SetSecurityDescriptorSddlForm('D:PAI(D;;FA;;;BG)(A;;0x1301bf;;;SY)(A;;0x1301bf;;;BA)(A;;0x1200a9;;;BU)(A;;FA;;;S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464)(A;;0x1200a9;;;AC)(A;;0x1200a9;;;S-1-15-2-2)S:(AU;SA;DTSD;;;WD)(AU;FA;FA;;;WD)(AU;FA;GA;;;BG)')
+
+        It '-AllowedAces Translates GenericRights and Ignores Audit/Deny ACEs when -ExactMatch Not Used and Audit and Deny ACEs Not Present' {
+            $SD | Test-Acl -AllowedAces "
+                Allow 'CREATOR OWNER', SYSTEM, Administrators, 'NT SERVICE\TrustedInstaller' FullControl
+                Allow * ReadAndExecute
+            " | Should Be $true
+        }
+        It '-AllowedAces Does Not Ignore Audit/Deny ACEs When They Are Present in Parameter' {
+            $Result = $SD | Test-Acl -AllowedAces "
+                Deny     S-1-2-3-4  FullControl    # This is just a fake placeholder
+                Allow    'CREATOR OWNER', SYSTEM, Administrators, 'NT SERVICE\TrustedInstaller' FullControl
+                Allow    * ReadAndExecute
+                Audit F  S-1-2-3-4 FullControl     # This is just a fake placeholder
+            " -Detailed
+
+            $Result.Result | Should Be $false
+            $ExpectedExtraAces = '
+                Deny       Guests                  FullControl                           O
+                Audit  S   Everyone                Delete, DeleteSubdirectoriesAndFiles  O
+                Audit   F  Everyone                FullControl                           O
+                Audit   F  Guests                  FullControl                           O
+            ' | ConvertToAce
+            $Result.ExtraAces.Count | Should Be $ExpectedExtraAces.Count
+            foreach ($ExtraAce in $Result.ExtraAces) {
+                $ExtraAce -in $ExpectedExtraAces | Should Be $true
+            }
+        }
+        It '-AllowedAces Does Not Translate Generic Rights And Does Not Ignore Audit/Deny ACEs When -ExactMach is Used' {
+            $Result = $SD | Test-Acl -AllowedAces "
+                Allow    'CREATOR OWNER', SYSTEM, Administrators, 'NT SERVICE\TrustedInstaller' FullControl
+                Allow    * ReadAndExecute
+            " -Detailed -ExactMatch
+
+            $Result.Result | Should Be $false
+            $ExpectedExtraAces = '
+                Deny       Guests                  FullControl                           O
+                Audit  S   Everyone                Delete, DeleteSubdirectoriesAndFiles  O
+                Audit   F  Everyone                FullControl                           O
+                Audit   F  Guests                  268435456                             O  # GenericAll
+            ' | ConvertToAce
+            $Result.ExtraAces.Count | Should Be $ExpectedExtraAces.Count
+            foreach ($ExtraAce in $Result.ExtraAces) {
+                $ExtraAce -in $ExpectedExtraAces | Should Be $true
+            }
+        }
+        It '-RequiredAces Handles Invalid Flags' {
+            throw "Decide how to handle the situation (see test definition)"
+            $SD | Test-Acl -RequiredAces "
+                Allow Administrators FullControl CC, CO
+            " | Should Be 'Should this be $true b/c this effectively means no ACE, or should it be $false b/c it can''t exist?'
+        }
+        It '-RequiredAces Works, Even When Flags Are Set (Files Don''t Support Flags)' {
+            $SD | Test-Acl -RequiredAces "
+                Deny Guests FullControl
+            " | Should Be $true
+
+            $SD | Test-Acl -RequiredAces "
+                Allow Administrators FullControl
+            " | Should Be $false   # Remember, Admins only have 'Modify' on the O
+
+            $SD | Test-Acl -RequiredAces "
+                Audit S  Everyone  Delete, DeleteSubdirectoriesAndFiles
+            " | Should Be $true
+        }
+
+        It 'Figure Out How To Handle Issue With .NET SD (Read Notes in Test)' {
+            $SD | Test-Acl -RequiredAces "
+                Audit SF  Everyone  Delete, DeleteSubdirectoriesAndFiles
+            " | Should Be $true   # This is currently failing, but it should work because that's the effective rights
+        }
+    
+        It '-DisallowedAces works as expected' {
+            $SD | Test-Acl -DisallowedAces "
+                Everyone Read
+            " | Should Be $true
+        
+            $SD | Test-Acl -DisallowedAces "
+                Users Read
+            " | Should Be $false
+        }
+        It '-DisallowedAces works with wildcards' {
+            $SD | Test-Acl -DisallowedAces "
+                Everyone *
+            " | Should Be $true
+
+            # No one should have FullControl on the folder (except TrustedInstaller)
+            $Result = $SD | Test-Acl -DisallowedAces "
+                Allow * FullControl O
+            " -Detailed
+            $Result.DisallowedAces.Count | Should Be 1
+            $Result.DisallowedAces | Should Be ('Allow "NT Service\TrustedInstaller" FullControl O' | ConvertToAce)
+        }
+
+        It '-AllowedAces, -DisallowedAces, -RequiredAces Can Work Together' {
+            $SD | Test-Acl -AllowedAces "
+                Allow    'CREATOR OWNER', SYSTEM, Administrators, 'NT SERVICE\TrustedInstaller' FullControl
+                Allow    * ReadAndExecute
+            " -RequiredAces "
+                Deny Guests FullControl
+                Audit F Everyone FullControl
+            " -DisallowedAces "
+                Allow Guests Read
+            "
+        }
+    }
+    Context 'Works with RegistrySecurity objects (Registry Keys)' {
+        <#
+           This is a default HKLM:\SOFTWARE SD, with an added 'Deny' for 'Guests', and two audit ACEs
+
+           The default Windows folder has generic rights mixed in with file/folder specific rights. The
+           security descriptor looks like this:
+
+           Deny    Guests                    RegistryRights: FullControl      O, CC
+           Allow  'CREATOR OWNER'            268435456                           CC   # This is GenericAll
+           Allow  SYSTEM                     RegistryRights: FullControl      O
+           Allow  SYSTEM                     268435456                           CC   # GenericAll
+           Allow  Administrators             RegistryRights: FullControl      O
+           Allow  Administrators             268435456                           CC   # GenericAll
+           Allow  Users                      RegistryRights: ReadKey          O
+           Allow  Users                      -2147483648                         CC   # GenericRead
+           Allow  'All Application Packages' -2147483648                         CC   # GenericRead
+           Allow  'All Application Packages' RegistryRights: ReadKey          O
+
+           Audit  S   Everyone               RegistryRights: Delete           O, CC
+           Audit   F  Everyone               RegistryRights: FullControl      O, CC
+           Audit   F  Guests                 268435456                        O       # GenericAll
+        #>
+        $SD = New-Object System.Security.AccessControl.RegistrySecurity
+        $SD.SetSecurityDescriptorSddlForm('O:BAG:SYD:PAI(D;CI;KA;;;BG)(A;CIIO;GA;;;CO)(A;;KA;;;SY)(A;CIIO;GA;;;SY)(A;;KA;;;BA)(A;CIIO;GA;;;BA)(A;;KR;;;BU)(A;CIIO;GR;;;BU)(A;CIIO;GR;;;AC)(A;;KR;;;AC)S:(AU;CISA;SD;;;WD)(AU;CIFA;KA;;;WD)(AU;FA;GA;;;BG)')
+
+        It '-AllowedAces Translates GenericRights and Ignores Audit/Deny ACEs when -ExactMatch Not Used and Audit and Deny ACEs Not Present' {
+            $SD | Test-Acl -AllowedAces "
+                Allow 'CREATOR OWNER', SYSTEM, Administrators RegistryRights: FullControl O, CC
+                Allow * RegistryRights: ReadKey O, CC
+            " | Should Be $true
+        }
+        It '-AllowedAces Translates GenericRights and Ignores Audit/Deny ACEs when -ExactMatch Not Used and Audit and Deny ACEs Not Present (CO flags should be ignored)' {
+            $SD | Test-Acl -AllowedAces "
+                Allow 'CREATOR OWNER', SYSTEM, Administrators RegistryRights: FullControl O, CC, CO
+                Allow * RegistryRights: ReadKey O, CC, CO
+            " | Should Be $true
+            $SD | Test-Acl -AllowedAces "
+                Allow 'CREATOR OWNER', SYSTEM, Administrators RegistryRights: FullControl
+                Allow * RegistryRights: ReadKey
+            " | Should Be $true
+        }
+        It '-AllowedAces Does Not Ignore Audit/Deny ACEs When They Are Present in Parameter' {
+            $Result = $SD | Test-Acl -AllowedAces "
+                Deny     S-1-2-3-4  RegistryRights: FullControl    # This is just a fake placeholder
+                Allow    'CREATOR OWNER', SYSTEM, Administrators, 'NT SERVICE\TrustedInstaller' RegistryRights: FullControl
+                Allow    * RegistryRights: ReadKey
+                Audit F  S-1-2-3-4 RegistryRights: FullControl     # This is just a fake placeholder
+            " -Detailed
+
+            $Result.Result | Should Be $false
+            $ExpectedExtraAces = '
+                Deny       Guests       RegistryRights: FullControl    O, CC
+                Audit  S   Everyone     RegistryRights: Delete         O, CC
+                Audit   F  Everyone     RegistryRights: FullControl    O, CC
+                Audit   F  Guests       RegistryRights: FullControl    O, CC
+            ' | ConvertToAce
+            $Result.ExtraAces.Count | Should Be $ExpectedExtraAces.Count
+            foreach ($ExtraAce in $Result.ExtraAces) {
+                $ExtraAce -in $ExpectedExtraAces | Should Be $true
+            }
+        }
+        It '-AllowedAces Does Not Translate Generic Rights And Does Not Ignore Audit/Deny ACEs When -ExactMach is Used' {
+            $Result = $SD | Test-Acl -AllowedAces "
+                Allow    'CREATOR OWNER', SYSTEM, Administrators, 'NT SERVICE\TrustedInstaller' RegistryRights: FullControl
+                Allow    * RegistryRights: ReadKey
+            " -Detailed -ExactMatch
+
+            $Result.Result | Should Be $false
+            $ExpectedExtraAces = '
+                Deny       Guests                  RegistryRights: FullControl           O, CC
+                Audit  S   Everyone                RegistryRights: Delete                O, CC
+                Audit   F  Everyone                RegistryRights: FullControl           O, CC
+                Audit   F  Guests                  268435456                             O, CC   # GenericAll
+            ' | ConvertToAce
+            $Result.ExtraAces.Count | Should Be $ExpectedExtraAces.Count
+            foreach ($ExtraAce in $Result.ExtraAces) {
+                $ExtraAce -in $ExpectedExtraAces | Should Be $true
+            }
+        }
+        It '-RequiredAces Works With Different Inheritance/PropagationFlags' {
+            $SD | Test-Acl -RequiredAces "
+                Deny Guests RegistryRights: FullControl
+            " | Should Be $true
+
+            $SD | Test-Acl -RequiredAces "
+                Allow Administrators RegistryRights: FullControl CC, CO  # CO should be ignored since -ExactMatch isn't specified
+            " | Should Be $true
+
+            $SD | Test-Acl -RequiredAces "
+                Allow 'NT Service\TrustedInstaller' RegistryRights: FullControl
+            " | Should Be $false  
+
+            $SD | Test-Acl -RequiredAces "
+                Audit S  Everyone  RegistryRights: Delete
+            " | Should Be $true
+        }
+        It '-RequiredAces Works With Different Inheritance/PropagationFlags (-ExactMatch specified)' {
+            $SD | Test-Acl -RequiredAces "
+                Deny Guests RegistryRights: FullControl O, CC, CO
+            " | Should Be $true
+            
+            $SD | Test-Acl -RequiredAces "
+                Deny Guests RegistryRights: FullControl O, CC, CO  # CO matters now
+            " -ExactMatch | Should Be $false
+
+            $SD | Test-Acl -RequiredAces "
+                Allow Administrators RegistryRights: FullControl CC, CO
+            " -ExactMatch | Should Be $false
+
+            $SD | Test-Acl -RequiredAces "
+                Audit S  Everyone  RegistryRights: Delete CC   # Missing O
+            " -ExactMatch | Should Be $false
+        }
+
+        It 'Figure Out How To Handle Issue With .NET SD (Read Notes in Test)' {
+            $SD | Test-Acl -RequiredAces "
+                Allow Administrators Modify     # This causes a failure right now b/c AddAccess() adds InheritanceFlags for the ACE that granted Modify to the Object only. I'd ideally like this to work, but I don't want to implement the AddAce() functionality
+                Audit S Everyone Delete
+                Audit F Everyone FullControl
+                Audit F Guests FullControl
+            " | Should Be $true
+            
+            $SD | Test-Acl -RequiredAces "
+                Audit SF  Everyone  Delete, DeleteSubdirectoriesAndFiles
+            " | Should Be $true   # This is currently failing, but it should work because that's the effective rights
+        }
+    
+        It '-DisallowedAces works as expected' {
+            $SD | Test-Acl -DisallowedAces "
+                Everyone Read
+            " | Should Be $true
+        
+            $SD | Test-Acl -DisallowedAces "
+                Users Read
+            " | Should Be $false
+        }
+        It '-DisallowedAces works with wildcards' {
+            $SD | Test-Acl -DisallowedAces "
+                Everyone *
+            " | Should Be $true
+
+            # No one should have FullControl on the folder (except TrustedInstaller)
+            $Result = $SD | Test-Acl -DisallowedAces "
+                Allow * RegistryRights: FullControl O
+            " -Detailed
+            $Result.DisallowedAces.Count | Should Be 3
+            throw "Put expected ACEs here!"
+        }
+
+        It '-AllowedAces, -DisallowedAces, -RequiredAces Can Work Together' {
+            $SD | Test-Acl -AllowedAces "
+                Allow    'CREATOR OWNER', SYSTEM, Administrators RegistryRights: FullControl
+                Allow    * RegistryRights: ReadKey
+            " -RequiredAces "
+                Deny Guests RegistryRights: FullControl
+                Audit F Everyone RegistryRights: FullControl
+            " -DisallowedAces "
+                Allow Guests RegistryRights: ReadKey
+            "
+        }
     }
 }
