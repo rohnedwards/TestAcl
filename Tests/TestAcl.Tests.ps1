@@ -103,7 +103,7 @@ Describe 'Convert ACEs' {
                 param(
                     [string] $String
                 )
-                ($String | ConvertToAce) -eq $RefAce | Should Be $true
+                $String | ConvertToAce | Should Be $RefAce
             }
         }
         It '<string>' @Params
