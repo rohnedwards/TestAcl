@@ -451,7 +451,7 @@ Describe 'Test-Acl' {
                 Allow * ReadAndExecute
             " | Should Be $true
         }
-        It '-AllowedAces (Synchronize Right Manually Specified) fails when expected' {
+        It '-AllowedAces fails when expected' {
             $Result = $SD | Test-Acl -AllowedAces "
                 'CREATOR OWNER' FullControl O, CC
                 SYSTEM FullControl
@@ -465,7 +465,7 @@ Describe 'Test-Acl' {
             $Result.Result | Should Be $false
             $Result.ExtraAces | Should Be ([System.Security.AccessControl.CommonAce]::new(
                 'ObjectInherit, InheritOnly',
-                'AllowedAccess',
+                'AccessAllowed',
                 [System.Security.AccessControl.FileSystemRights]::FullControl,
                 'S-1-3-0',
                 $false,
