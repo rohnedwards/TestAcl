@@ -1,0 +1,14 @@
+
+Note about using RemoveAce for -DisallowedAccess:
+RemoveAccess() is a little too change-y for my taste to be used for this. Check out this example:
+
+$CommSD = Get-Acl C:\Windows | NewCommonSecurityDescriptor
+$Ace = "Allow Administrators DeleteSubdirectoriesAndFiles, ChangePermissions, TakeOwnership O" | ConvertToAce
+$Commsd.DiscretionaryAcl | where securityidentifier -like *544 | ft acetype, security*, accessmask, i*flags, p*flags
+$Commsd.DiscretionaryAcl.RemoveAccess('Allow', 'S-1-5-32-544', [System.Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles, 'None', 'None')
+$Commsd.DiscretionaryAcl | where securityidentifier -like *544 | ft acetype, security*, accessmask, i*flags, p*flags
+
+Notice how it split the CC, CO ACE up. That's fine from an effective access control standpoint, but it won't work in this application where we depend on RemoveAce to not change the ACL if the access is already present.
+FindAce shouldn't have the same issue since it's looking for effective ACEs.
+
+AddAce might not suffer from the same problems, so -RequiredAccess might be fine. Significant investment in FindAce would make it better than AddAce for -RequiredAccess, though.
