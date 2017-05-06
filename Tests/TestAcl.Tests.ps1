@@ -1,6 +1,7 @@
 
 $Module = Import-Module $PSScriptRoot\..\TestAcl.psm1 -PassThru
 
+InModuleScope $Module.Name {
 Describe 'Convert ACEs' {
 
     $ReferenceAccessAce = [System.Security.AccessControl.CommonAce]::new(
@@ -954,7 +955,6 @@ Describe 'Test-Acl' {
     }
 }
 Describe 'FindAce' {
-    $FindAce = Get-Command FindAce
 
     $SD = New-Object System.Security.AccessControl.DirectorySecurity
     $SD.SetSecurityDescriptorSddlForm('D:PAI(D;OICI;FA;;;BG)(A;OICIIO;GA;;;CO)(A;;0x1301bf;;;SY)(A;OICIIO;GA;;;SY)(A;;0x1301bf;;;BA)(A;OICIIO;GA;;;BA)(A;;0x1200a9;;;BU)(A;OICIIO;GXGR;;;BU)(A;;FA;;;S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464)(A;CIIO;GA;;;S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464)(A;OICIIO;GXGR;;;AC)(A;;0x1200a9;;;AC)(A;OICIIO;GXGR;;;S-1-15-2-2)(A;;0x1200a9;;;S-1-15-2-2)S:(AU;OICISA;DTSD;;;WD)(AU;OICIFA;FA;;;WD)(AU;OICIFA;GA;;;BG)')
@@ -984,4 +984,5 @@ Describe 'FindAce' {
         $FoundAces = @($SD | FindAce $Ace -ExactMatch)
         $FoundAces.Count | Should Be 0
     }
+}
 }

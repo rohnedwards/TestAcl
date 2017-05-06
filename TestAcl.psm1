@@ -196,7 +196,7 @@ No wildcards are allowed for -RequiredAccess.
         }
         foreach ($DisallowedAce in $DisallowedAccess) {
             try {
-                $BadACEs = @($SD | FindAce $DisallowedAce)
+                $BadACEs = $SD | FindAce $DisallowedAce
                 
                 if ($null -ne $BadACEs) {
                     $FinalResult = $false
@@ -209,7 +209,7 @@ No wildcards are allowed for -RequiredAccess.
                     
                     # -Detailed must have been specified
                     Write-Verbose "Adding disallowed ACE to list"
-                    $null = $PresentDisallowedAces.AddRange($BadACEs)
+                    $null = $PresentDisallowedAces.AddRange(@($BadACEs))
                 }
             }
             catch {
@@ -289,6 +289,7 @@ No wildcards are allowed for -RequiredAccess.
         }
     }
 }
+Export-ModuleMember -Function Test-Acl
 
 $GenericRightsDef = @{
     GenericRead = -2147483648
