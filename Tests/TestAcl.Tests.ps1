@@ -961,7 +961,7 @@ Describe 'FindAce' {
     $SD = $SD | NewCommonSecurityDescriptor
 
     It 'Simple Non-Exact Search' {
-        $Ace = "Allow Administrators FullControl O" | ConvertToAce
+        $Ace = "Allow Administrators DeleteSubdirectoriesAndFiles, ChangePermissions, TakeOwnership O" | ConvertToAce
         
         $FoundAces = @($SD | FindAce $Ace)
         $FoundAces.Count | Should Be 0

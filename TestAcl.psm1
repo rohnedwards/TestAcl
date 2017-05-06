@@ -472,14 +472,10 @@ Helper function that takes a reference ACE and finds any ACEs with overlap for t
 
            $_.AceQualifier -eq $Ace.AceQualifier -and
            $_.SecurityIdentifier -eq $Ace.SecurityIdentifier -and
-           $AccessMaskOverlap -eq $Ace.AccessMask -and
            $AppliesToOverlap -gt 0 -and
-           ($ExactMatch -eq $false -or $AppliesToOverlap -eq $AceAppliesTo)
-
-<#
+           ($ExactMatch -eq $false -or $AppliesToOverlap -eq $AceAppliesTo) -and
            $AccessMaskOverlap -ne 0 -and
-           ($ExactMatch -eq $false -or $AccessMaskOverlap -eq $Ace.AccessMask) -and
-#>
+           ($ExactMatch -eq $false -or $AccessMaskOverlap -eq $Ace.AccessMask)
         }
 
     }
@@ -932,6 +928,17 @@ function ConvertToAce {
                     Write-Error "Error translating IdentityReference [$($InputObject.IdentityReference)] to SID: ${_}"
                     return
                 }
+
+                # Smelly!!
+                $AccessRightType = switch ($InputObject.GetType()) {
+                    System.Security.AccessControl.FileSystemAccessRule { [System.Security.AccessControl.FileSystemRights]; break }
+                    System.Security.AccessControl.FileSystemAuditRule  { [System.Security.AccessControl.FileSystemRights]; break }
+                    System.Security.AccessControl.RegistryAccessRule   { [System.Security.AccessControl.RegistryRights]; break   }
+                    System.Security.AccessControl.RegistryAuditRule    { [System.Security.AccessControl.RegistryRights]; break   }
+                    System.DirectoryServices.ActiveDirectoryAccessRule { [System.DirectoryServices.ActiveDirectoryRights]; break }
+                    System.DirectoryServices.ActiveDirectoryAuditRule  { [System.DirectoryServices.ActiveDirectoryRights]; break }
+                    default { $null }
+                }
             }
 
             { $InputObject -is [System.Security.AccessControl.ObjectAccessRule] -or $InputObject -is [System.Security.AccessControl.ObjectAuditRule] } {
@@ -1025,6 +1032,10 @@ function ConvertToAce {
             New-Object $AceType $Arguments.ToArray() | ForEach-Object {
                 if ($WildcardString) {
                     $_ | Add-Member -NotePropertyName __WildcardString -NotePropertyValue $WildcardString
+                }
+                
+                if ($AccessRightType) {
+                    $_ | Add-Member -NotePropertyName __AccessRightType -NotePropertyValue $AccessRightType
                 }
                 $_
             }
