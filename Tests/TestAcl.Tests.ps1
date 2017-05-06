@@ -927,18 +927,18 @@ Describe 'Test-Acl' {
             $SD | Test-Acl -DisallowedAccess "
                 Users Read
             " | Should Be $false
-        }
-        It '-DisallowedAccess works with wildcards' {
+            
             $SD | Test-Acl -DisallowedAccess "
-                Everyone *
+                Everyone FullControl
             " | Should Be $true
 
-            # No one should have FullControl on the folder (except TrustedInstaller)
+            # This SD has 3 accounts that have TakeOwnership: CREATOR OWNER, SYSTEM, 
+            # Administrators, and CREATOR OWNER doesn't have it over the key, so there 
+            # should only be two results
             $Result = $SD | Test-Acl -DisallowedAccess "
-                Allow * RegistryRights: FullControl O
+                Allow * RegistryRights: TakeOwnership O
             " -Detailed
-            $Result.DisallowedAces.Count | Should Be 3
-            throw "Put expected ACEs here!"
+            $Result.DisallowedAces.Count | Should Be 2
         }
 
         It '-AllowedAccess, -DisallowedAccess, -RequiredAccess Can Work Together' {

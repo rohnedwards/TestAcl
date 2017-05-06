@@ -209,7 +209,7 @@ No wildcards are allowed for -RequiredAccess.
                     
                     # -Detailed must have been specified
                     Write-Verbose "Adding disallowed ACE to list"
-                    $null = $PresentDisallowedAces.Add($DisallowedAce)
+                    $null = $PresentDisallowedAces.AddRange($BadACEs)
                 }
             }
             catch {
@@ -466,34 +466,28 @@ NOTE: AccessMask is modified with ToAccessMask (unless -ExactMatch) is specified
             $SecurityDescriptor.SystemAcl
         }
         
-        if ($null -ne $Ace.__WildcardString) {
-            Write-Verbose "RemoveAce: Wildcard ACE found!"
-            $NonWildcardAce = $Ace.Copy()  # Un-PSObjectify this so we don't go into infinite loop
-            
-            foreach ($CurrentSid in $Acl.SecurityIdentifier) {
-                try {
-                    $Principal = $CurrentSid.Translate([System.Security.Principal.NTAccount])
-                    if ($Principal -like $Ace.__WildcardString) {
-                        $NonWildcardAce.SecurityIdentifier = $CurrentSid
-                        $SecurityDescriptor | FindAce $NonWildcardAce
-                    }
-                    else {
-                        Write-Verbose "  -> '${Principal}' name doesn't match wildcard ($($Ace.__WildcardString))"
-                    }
+        $PrincipalFilter = if ($null -ne $Ace.__WildcardString) {
+            {
+                $Principal = try {
+                    $_.SecurityIdentifier.Translate([System.Security.Principal.NTAccount])
                 }
                 catch {
-                    Write-Warning "Error while processing wildcard ACE for '${CurrentSid}': ${_}"
+                    $null # Can still match if wildcard string is '*'
                 }
+                Write-Verbose "Testing if '${Principal} -like '$($Ace.__WildcardString)'"
+                $Principal -like $Ace.__WildcardString
             }
-            return # All the work's been done; we don't want to drop out of this block/
         }
-
+        else {
+           { $_.SecurityIdentifier -eq $Ace.SecurityIdentifier }
+        }
+        
         if ($Ace -is [System.Security.AccessControl.ObjectAce] -or $SD.IsDS) {
             throw "Object ACEs and DS SDs aren't supported yet!"
         }
 
         $AceAppliesTo = FlagsToAppliesTo $Ace
-        $Acl | Where-Object {
+        $BigFilter = {
            if ($ExactMatch) {
                 $AccessMaskOverlap = $_.AccessMask -band $Ace.AccessMask
            }
@@ -509,15 +503,16 @@ NOTE: AccessMask is modified with ToAccessMask (unless -ExactMatch) is specified
 
            $AppliesTo = FlagsToAppliesTo $_
            $AppliesToOverlap = $AppliesTo.value__ -band $AceAppliesTo
-
+           
            $_.AceQualifier -eq $Ace.AceQualifier -and
-           $_.SecurityIdentifier -eq $Ace.SecurityIdentifier -and
            $AppliesToOverlap -gt 0 -and
            ($ExactMatch -eq $false -or $AppliesToOverlap -eq $AceAppliesTo) -and
            $AccessMaskOverlap -ne 0 -and
            ($ExactMatch -eq $false -or $AccessMaskOverlap -eq $Ace.AccessMask)
         }
 
+        $Acl | Where-Object $PrincipalFilter | Where-Object $BigFilter
+        
     }
 }
 function RemoveAce {
@@ -1125,6 +1120,16 @@ function NewCommonSecurityDescriptor {
                         GenericWrite = [System.Security.AccessControl.FileSystemRights] 'Write, ReadPermissions, Synchronize'
                         GenericExecute = [System.Security.AccessControl.FileSystemRights] 'ExecuteFile, ReadAttributes, ReadPermissions, Synchronize'
                         GenericAll = [System.Security.AccessControl.FileSystemRights] 'FullControl'
+                    }
+                }
+
+                ([System.Security.AccessControl.RegistryRights]) {
+                    Write-Verbose "Registry generic rights dictionary"
+                    @{
+                        GenericRead = [System.Security.AccessControl.RegistryRights] 131097
+                        GenericWrite = [System.Security.AccessControl.RegistryRights] 131078
+                        GenericExecute = [System.Security.AccessControl.RegistryRights] 131129
+                        GenericAll = [System.Security.AccessControl.RegistryRights] 983103
                     }
                 }
 
