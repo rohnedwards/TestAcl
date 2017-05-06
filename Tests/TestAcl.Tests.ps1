@@ -641,12 +641,12 @@ Describe 'Test-Acl' {
         }
         It '-DisallowedAccess works with wildcards' {
             $SD | Test-Acl -DisallowedAccess "
-                Everyone *
-            " | Should Be $true
+                Everyone FullControl
+            " | Should Be $true   # Since there is no ACE granting anything to 'Everyone', this test passes
 
-            # No one should have FullControl on the folder (except TrustedInstaller)
+            # No one should have TakeOwnership on the folder (except TrustedInstaller)
             $Result = $SD | Test-Acl -DisallowedAccess "
-                Allow * FullControl O
+                Allow * TakeOwnership O
             " -Detailed
             $Result.DisallowedAces.Count | Should Be 1
             $Result.DisallowedAces | Should Be ('Allow "NT Service\TrustedInstaller" FullControl O' | ConvertToAce)
@@ -973,7 +973,7 @@ Describe 'FindAce' {
         $FoundAces.Count | Should Be 1
     }
     It 'Simple Non-Exact Search' {
-        $Ace = "Allow Administrators FullControl" | ConvertToAce
+        $Ace = "Allow Administrators DeleteSubDirectoriesAndFiles, ChangePermissions, TakeOwnership" | ConvertToAce
         
         $FoundAces = @($SD | FindAce $Ace)
         $FoundAces.Count | Should Be 1
