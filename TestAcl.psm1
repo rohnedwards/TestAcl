@@ -10,38 +10,38 @@ process, especially considering all of the different types of securable objects 
 
 Test-Acl attempts to simplify this process. After providing an -InputObject, which can be either the
 securable object, e.g., file, folder, registry key, or a security descriptor object itself, you also provide
-an -AllowedAces value, a -DisallowedAces value, and/or a -RequiredAces value. 
+an -AllowedAccess value, a -DisallowedAccess value, and/or a -RequiredAccess value. 
 
-AllowedAces
+AllowedAccess
 -----------
-The -AllowedAces can be thought of as a whitelist: any access that these ACEs grant are allowed to be present 
+The -AllowedAccess can be thought of as a whitelist: any access that these ACEs grant are allowed to be present 
 in the SD, even if they don't match exactly. For example, you can specify that an ACE granting Users 'Read, 
 Write' to a folder, subfolders, and files is allowed, but the SD you're testing may only grant Users 'Read' to 
 subfolders. This less-permissive ACE would not cause the test (to fail well, unless the -ExactMatch switch is 
 also specified). If, however, the SD had an ACE granting Users 'Read, Delete', the test would fail because 
-'Delete' isn't contained in the -AllowedAces.
+'Delete' isn't contained in the -AllowedAccess.
 
-The -AllowedAces string formats can also contain wildcards for principals. This is useful for when you want to
+The -AllowedAccess string formats can also contain wildcards for principals. This is useful for when you want to
 allow certain rights to be allowed, even when you don't know what principals they may be granted to. For example,
 maybe you're only looking for objects where users have more than Read access. Specifying the following in the
--AllowedAces would take care of that: Allow * Read
+-AllowedAccess would take care of that: Allow * Read
 
-DisallowedAces
+DisallowedAccess
 --------------
-The -DisallowedAces parameter can be thought of as a blacklist: any overlap in ACE principal/accessmask/flags
+The -DisallowedAccess parameter can be thought of as a blacklist: any overlap in ACE principal/accessmask/flags
 defined in this parameter and ACEs present on the securable object will cause the test to fail. For example,
 assume the following SD:
 
 Deny   Guests    FullControl
 Allow  Everyone  FullControl
 
-If -DisallowedAces is passed 'Allow Everyone Read', the test would fail because the read access is contained
+If -DisallowedAccess is passed 'Allow Everyone Read', the test would fail because the read access is contained
 in the SD's actual access.
 
 
-RequiredAces
+RequiredAccess
 ------------
-The -RequiredAces is a list of ACEs that MUST be specified. If more access/audit rights (or inheritance flags)
+The -RequiredAccess is a list of ACEs that MUST be specified. If more access/audit rights (or inheritance flags)
 are granted, that's OK. For example, assume you specify the following -RequireAces list:
 
 Allow Users Read SubFolders
@@ -53,7 +53,7 @@ rights. If there was a Deny ACE that denied more than 'Write' to guests, that wo
 to the folder, subfolders, and files (since no inheritance/propagation information was specified, it defaults to
 applying to all)
 
-No wildcards are allowed for -RequiredAces.
+No wildcards are allowed for -RequiredAccess.
 
 .NOTES
 
@@ -68,21 +68,21 @@ No wildcards are allowed for -RequiredAces.
         # descriptors returned from Get-Acl, [more examples go here]
         $InputObject,
         [Parameter()]
-        # A list of ACEs that can be present in the security descriptor. If -AllowedAces
+        # A list of ACEs that can be present in the security descriptor. If -AllowedAccess
         # is provided, then the security descriptor CANNOT contain any ACEs except what's
-        # provided in the -AllowedAces collection. The collection can contain ACEs that
+        # provided in the -AllowedAccess collection. The collection can contain ACEs that
         # aren't present in the security descriptor, however.
         [System.Security.AccessControl.QualifiedAce[]] 
         [Roe.TransformScript({
             $_ | ConvertToAce -ErrorAction Stop
         })]
-        $AllowedAces,
+        $AllowedAccess,
         [Parameter()]
-        # A list of ACEs that cannot be present in the security descriptor. If -DisallowedAces
+        # A list of ACEs that cannot be present in the security descriptor. If -DisallowedAccess
         # is provided, then the security descriptor MUST NOT contain any access defined in the
         # described ACEs collection.
         #
-        # If the -ExactMatch switch is also provided, then any ACEs defined in -DisallowedAces
+        # If the -ExactMatch switch is also provided, then any ACEs defined in -DisallowedAccess
         # must be present in the EXACT form they are defined in order for the test to fail,
         # e.g., 'Allow Users Read O, CC, CO' would fail the Test-Acl test if it was called
         # against an SD that had an ACE that granted 'Users FullControl CO' and -ExactMatch
@@ -92,17 +92,17 @@ No wildcards are allowed for -RequiredAces.
         [Roe.TransformScript({
             $_ | ConvertToAce -ErrorAction Stop
         })]
-        $DisallowedAces,
+        $DisallowedAccess,
         [Parameter()]
         # A list of ACEs that MUST be present in the security descriptor. The security
         # descriptor is still allowed to contain ACEs that aren't listed in the
-        # -RequiredAces collection. 
+        # -RequiredAccess collection. 
         [System.Security.AccessControl.QualifiedAce[]] 
         [Roe.TransformScript({
             $_ | ConvertToAce -ErrorAction Stop
         })]
-        $RequiredAces,
-        # By default, ACEs aren't required to match the -AllowedAces or -RequiredAces
+        $RequiredAccess,
+        # By default, ACEs aren't required to match the -AllowedAccess or -RequiredAccess
         # exactly, i.e., the AccessMask and/or InheritanceFlags can differ as long as 
         # the effective access is present. For example, if the security descriptor 
         # being tested has an ACE that grants 'Everyone' 'FullControl' that applies 
@@ -131,7 +131,7 @@ No wildcards are allowed for -RequiredAces.
         # We need to know if there are any Audit ACEs being tested for so we know if we need
         # to pass -Audit:$true to NewCommonSecurityDescriptor (if user specifies an SD to
         # function, this doesn't really matter since the -Audit switch wouldn't be used)
-        $AuditRulesSpecified = [bool] (($AllowedAces, $RequiredAces).AceQualifier -eq [System.Security.AccessControl.AceQualifier]::SystemAudit)
+        $AuditRulesSpecified = [bool] (($AllowedAccess, $RequiredAccess).AceQualifier -eq [System.Security.AccessControl.AceQualifier]::SystemAudit)
     
         if ($ExactMatch) {
             throw "-ExactMatch isn't implemented yet"
@@ -152,11 +152,11 @@ No wildcards are allowed for -RequiredAces.
         $UnapprovedAccess = New-Object System.Collections.ArrayList
         $PresentDisallowedAces = New-Object System.Collections.ArrayList
 
-        # Process -RequiredAces first since -AllowedAces test requires ACLs to
+        # Process -RequiredAccess first since -AllowedAccess test requires ACLs to
         # be emptied out completely
         #
         # The way this works is that we'll remember the Sddl form, and attempt
-        # to add each -RequiredAces entry. After adding each ACE, we'll test the
+        # to add each -RequiredAccess entry. After adding each ACE, we'll test the
         # Sddl form again. If the SD already effectively contained that ACE, the
         # Sddl form should be unchanged. If we detect a change, we know that the
         # function should exit with a failure.
@@ -167,7 +167,7 @@ No wildcards are allowed for -RequiredAces.
         # instead of just getting a 'This failed' message, you could provide more
         # information about WHY it failed
         $StartingSddlForm = $SD.GetSddlForm('All')
-        foreach ($ReqAce in $RequiredAces) {
+        foreach ($ReqAce in $RequiredAccess) {
             try {
                 $SD | AddAce $ReqAce -ErrorAction Stop
                 if ($StartingSddlForm -ne $SD.GetSddlForm('All')) {
@@ -194,7 +194,7 @@ No wildcards are allowed for -RequiredAces.
                 return
             }
         }
-        foreach ($DisallowedAce in $DisallowedAces) {
+        foreach ($DisallowedAce in $DisallowedAccess) {
             try {
                 $BadACEs = $SD | FindAce $DisallowedAce
                 
@@ -218,12 +218,12 @@ No wildcards are allowed for -RequiredAces.
             }
         }
 
-        # Could sort -AllowedAces based on whether or not they're Wildcard ACEs. It would
+        # Could sort -AllowedAccess based on whether or not they're Wildcard ACEs. It would
         # be slightly more effecient to wait until normal ACEs have been removed. Time will
         # tell (this would probably be more noticeable on AD objects)
         $AllowedAccessAcesSpecified = $AllowedAuditAcesSpecified = $false
-        $DenyAcePresent = $false   # Only used if there are ACEs left after going through all $AllowedAces
-        foreach ($AllowedAce in $AllowedAces) {
+        $DenyAcePresent = $false   # Only used if there are ACEs left after going through all $AllowedAccess
+        foreach ($AllowedAce in $AllowedAccess) {
             Write-Debug "Removing ACE"
             try {
                 $SD | RemoveAce $AllowedAce -ErrorAction Stop
@@ -245,7 +245,7 @@ No wildcards are allowed for -RequiredAces.
         }
             
         if ($false -eq $DenyAcePresent -and $false -eq $ExactMatch) {
-            # Try to remove all Deny ACEs since they are ignored by default if the -AllowedAces
+            # Try to remove all Deny ACEs since they are ignored by default if the -AllowedAccess
             # collection doesn't contain one
             foreach ($DenyAce in ($SD.DiscretionaryAcl | Where-Object { $_.AceQualifier -eq [System.Security.AccessControl.AceQualifier]::AccessDenied })) {
                 Write-Verbose "  -> Removing Deny ACE"
@@ -254,7 +254,7 @@ No wildcards are allowed for -RequiredAces.
         }
         
         if ($AllowedAccessAcesSpecified -and $SD.DiscretionaryAcl.Count -gt 0) {
-            Write-Verbose "  -> DACL still contains entries, so there must have been some access not specified in -AllowedAces present"
+            Write-Verbose "  -> DACL still contains entries, so there must have been some access not specified in -AllowedAccess present"
             
             $FinalResult = $false
             
@@ -266,7 +266,7 @@ No wildcards are allowed for -RequiredAces.
         }
 
         if ($AllowedAuditAcesSpecified -and $SD.SystemAcl.Count -gt 0) {
-            Write-Verbose "  -> SACL still contains entries, so there must have been some access not specified in -AllowedAces present"
+            Write-Verbose "  -> SACL still contains entries, so there must have been some access not specified in -AllowedAccess present"
             $FinalResult = $false
 
             if ($Detailed) {
@@ -358,7 +358,7 @@ function AddAce {
         $GenericRightsDict = $SecurityDescriptor.__GenericRightsDict
 
         if ($null -ne $Ace.__WildcardString) {
-            Write-Error "Wildcard ACEs aren't valid for -RequiredAces parameter"
+            Write-Error "Wildcard ACEs aren't valid for -RequiredAccess parameter"
             return
         }
 
