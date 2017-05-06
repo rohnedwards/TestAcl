@@ -440,7 +440,10 @@ function AddAce {
 function FindAce {
 <#
 Helper function that takes a reference ACE and finds any ACEs with overlap for the reference ACE (unless ExactMatch is specified, in which case it finds ACEs that match the reference ACE exactly)
+
+NOTE: AccessMask is modified with ToAccessMask (unless -ExactMatch) is specified. This is specifically for the Synchronize FileSystemRight (maybe other rights if they are supposed to have the special treatment the Synchronize right gets).
 #>
+
     [CmdletBinding()]
     param(
         [Parameter(Mandatory, ValueFromPipeline)]
@@ -491,7 +494,19 @@ Helper function that takes a reference ACE and finds any ACEs with overlap for t
 
         $AceAppliesTo = FlagsToAppliesTo $Ace
         $Acl | Where-Object {
-           $AccessMaskOverlap = $_.AccessMask -band $Ace.AccessMask
+           if ($ExactMatch) {
+                $AccessMaskOverlap = $_.AccessMask -band $Ace.AccessMask
+           }
+           else {
+                # Use ToAccessMask to get rid of the Synchronize right for FileSystemRights ACEs (and any future rights
+                # that have the same issue as that one since ToAccessMask would take care of it for us)
+                $TAMParams = @{
+                    Action = 'Remove'  # This will remove rights that get automatically added (like FSR 'Synchronize')
+                    AccessRightType = $Ace.__AccessRightType  # OK if this is null/undefined
+                }
+                $AccessMaskOverlap = (ToAccessMask $_.AccessMask @TAMParams) -band (ToAccessMask $Ace.AccessMask @TAMParams)
+           }
+
            $AppliesTo = FlagsToAppliesTo $_
            $AppliesToOverlap = $AppliesTo.value__ -band $AceAppliesTo
 
