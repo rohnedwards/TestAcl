@@ -766,15 +766,14 @@ Describe 'Test-Acl' {
             $SD | Test-Acl -DisallowedAccess "
                 Users Read
             " | Should Be $false
-        }
-        It '-DisallowedAccess works with wildcards' {
+            
             $SD | Test-Acl -DisallowedAccess "
-                Everyone *
+                Everyone FullControl
             " | Should Be $true
 
-            # No one should have FullControl on the folder (except TrustedInstaller)
+            # No one should have TakeOwnership on the file (except TrustedInstaller)
             $Result = $SD | Test-Acl -DisallowedAccess "
-                Allow * FullControl O
+                Allow * TakeOwnership O
             " -Detailed
             $Result.DisallowedAces.Count | Should Be 1
             $Result.DisallowedAces | Should Be ('Allow "NT Service\TrustedInstaller" FullControl O' | ConvertToAce)

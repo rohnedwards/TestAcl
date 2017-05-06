@@ -196,7 +196,7 @@ No wildcards are allowed for -RequiredAccess.
         }
         foreach ($DisallowedAce in $DisallowedAccess) {
             try {
-                $BadACEs = $SD | FindAce $DisallowedAce
+                $BadACEs = @($SD | FindAce $DisallowedAce)
                 
                 if ($null -ne $BadACEs) {
                     $FinalResult = $false
