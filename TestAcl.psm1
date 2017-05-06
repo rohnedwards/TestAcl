@@ -305,7 +305,11 @@ function ToAccessMask {
     [CmdletBinding()]
     param(
         [int] $AccessMask,
-        [System.Collections.IDictionary] $GenericRightsDict
+        [System.Collections.IDictionary] $GenericRightsDict,
+        [ValidateSet('Add', 'Remove')]
+        [string] $Action = 'Add',
+        [type] $AccessRightType,
+        [System.Security.AccessControl.AceQualifier] $AceQualifier
     )
     
     if ($null -ne $GenericRightsDict) {
@@ -323,6 +327,27 @@ function ToAccessMask {
                 $AccessMask = $AccessMask -bor $GenericRightsDict[$GenRight]
                 Write-Verbose "  ...new mask = ${AccessMask}"
             }
+        }
+    }
+
+    # This is where we're going to do some "fixups" for certain access rights (I'm 
+    # actually only aware of this happening with FileSystemRights). The thing is 
+    # that FileSystemAccessRule class has logic to automatically add the 
+    # 'Synchronize' right to any Allow ACEs, and to remove it from any 'Deny' ACEs
+    # (unless it's FullControl). Because we don't want users to have to specify 
+    # Synchronize manually, we're going to handle that, too
+    # 
+    # NOTE: Add action gets the special rights added, and Remove action gets it
+    #       removed. Callers will have logic to treat a Deny ACE as a Remove 
+    #       action at all times.
+    if ($AccessRightType -eq [System.Security.AccessControl.FileSystemRights]) {
+        if ($Action -eq 'Add' -and $AceQualifier -eq [System.Security.AccessControl.AceQualifier]::AccessAllowed) {
+            Write-Verbose "Adding Synchronize right"
+            $AccessMask = $AccessMask -bor [System.Security.AccessControl.FileSystemRights]::Synchronize
+        }
+        elseif (($Action -eq 'Remove' -or $AceQualifier -eq [System.Security.AccessControl.AceQualifier]::AccessDenied) -and $AccessMask -ne [System.Security.AccessControl.FileSystemRights]::FullControl.value__) { 
+            Write-Verbose "Removing Synchronize right"
+            $AccessMask = $AccessMask -band (-bnot [System.Security.AccessControl.FileSystemRights]::Synchronize) 
         }
     }
 
@@ -390,7 +415,7 @@ function AddAce {
 
         $null = $Arguments.AddRange((
             $Ace.SecurityIdentifier,
-            (ToAccessMask $Ace.AccessMask -GenericRights $GenericRightsDict),
+            (ToAccessMask $Ace.AccessMask -GenericRights $GenericRightsDict -AccessRightType $Ace.__AccessRightType -Action Add -AceQualifier $Ace.AceQualifier),
             $InheritanceFlags,
             $PropagationFlags
         ))
@@ -546,7 +571,7 @@ function RemoveAce {
 
         $null = $Arguments.AddRange((
             $Ace.SecurityIdentifier,
-            (ToAccessMask $Ace.AccessMask -GenericRights $GenericRightsDict),
+            (ToAccessMask $Ace.AccessMask -GenericRights $GenericRightsDict -AccessRightType $Ace.__AccessRightType -Action Remove -AceQualifier $Ace.AceQualifier),
             $Ace.InheritanceFlags,
             $Ace.PropagationFlags
         ))
@@ -823,23 +848,6 @@ function ConvertToAce {
                             return
                         }
 
-                        # This probably belongs in ToAccessMask. This is where we're going to do some
-                        # "fixups" for certain access rights (I'm actually only aware of this happening
-                        # with FileSystemRights). The thing is that FileSystemAccessRule class has logic
-                        # to automatically add the 'Synchronize' right to any Allow ACEs, and to remove
-                        # it from any 'Deny' ACEs (unless it's FullControl). Because we don't want users
-                        # to have to specify Synchronize manually, we're going to handle that, too
-                        if ($AccessRightType -eq [System.Security.AccessControl.FileSystemRights]) {
-                            if ($AceQualifier -eq [System.Security.AccessControl.AceQualifier]::AccessAllowed -or $null -eq $AceQualifier) {
-                                Write-Verbose "Adding Synchronize right"
-                                $AccessMask = $AccessMask -bor [System.Security.AccessControl.FileSystemRights]::Synchronize
-                            }
-                            elseif ($AceQualifier -eq [System.Security.AccessControl.AceQualifier]::AccessDenied -and $AccessMask -ne [System.Security.AccessControl.FileSystemRights]::FullControl.value__) {
-                                Write-Verbose "Removing Synchronize right"
-                                $AccessMask = $AccessMask -band (-bnot [System.Security.AccessControl.FileSystemRights]::Synchronize) 
-                            }
-                        }
-
                         $LastTokenSection = 3
                     }
                     elseif ($LastTokenSection -lt 4 -and ($AceFlags.value__ -band [System.Security.AccessControl.AceFlags]::InheritanceFlags) -eq 0) {  # -and (and everything after) can probably just go!
@@ -994,7 +1002,7 @@ function ConvertToAce {
             $null = $Arguments.AddRange((
                 $AceFlags,
                 $AceQualifier,
-                $AccessMask,
+                (ToAccessMask $AccessMask -AccessRightType $AccessRightType -AceQualifier $AceQualifier),
                 $CurrentSid
 
             ))

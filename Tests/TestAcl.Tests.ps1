@@ -85,6 +85,14 @@ Describe 'Convert ACEs' {
     }
 
     Context 'String -> File Deny ACE [Deny Everyone Read, Write, Delete AppliesTo Folder, SubFolders, and Files]'  {
+        $RefAce = [System.Security.AccessControl.CommonAce]::new(
+            'ObjectInherit, ContainerInherit',
+            [System.Security.AccessControl.AceQualifier]::AccessDenied,
+            [System.Security.AccessControl.FileSystemRights] 'Read, Write, Delete',
+            ([System.Security.Principal.NTAccount] 'Everyone').Translate([System.Security.Principal.SecurityIdentifier]),
+            $false,
+            $null
+        )
         $Params = @{
             TestCases = @{ String = 'Deny Everyone Read and Write and Delete to Object, ChildContainers, and ChildObjects' },
                 @{String = 'Deny Everyone Read, Write, Delete' },
@@ -95,14 +103,7 @@ Describe 'Convert ACEs' {
                 param(
                     [string] $String
                 )
-                $String | ConvertToAce | Should Be ([System.Security.AccessControl.CommonAce]::new(
-                    'ObjectInherit, ContainerInherit',
-                    [System.Security.AccessControl.AceQualifier]::AccessDenied,
-                    [System.Security.AccessControl.FileSystemRights] 'Read, Write, Delete',
-                    ([System.Security.Principal.NTAccount] 'Everyone').Translate([System.Security.Principal.SecurityIdentifier]),
-                    $false,
-                    $null
-                ))
+                ($String | ConvertToAce) -eq $RefAce | Should Be $true
             }
         }
         It '<string>' @Params
