@@ -762,8 +762,7 @@ function ConvertToAce {
                     elseif ('SystemAudit' -eq $AceQualifier -and ([System.Security.AccessControl.AceFlags]::AuditFlags.value__ -band $AceFlags.value__) -eq 0) {
                         # At this point, Success, Failure (or SF) are not optional. This node must contain
                         # information about it
-#                        if ($CurrentNodeText -match '^(?<success>S(uccess)?)?(\s*\,\s*)?(?<failure>F(ailure)?)?$') {
-                        if (($CurrentNodeText -join ' ') -match '^(?<success>S(uccess)?)?\s*(?<failure>F(ailure)?)?$') {
+                        if (($CurrentNodeText -join ' ') -match '^(((?<success>S(uccess)?)|(?<failure>F(ailure)?))\s*){1,2}$') {
                             if ($matches.success) {
                                 $AceFlags = $AceFlags.value__ -bor [System.Security.AccessControl.AceFlags]::SuccessfulAccess
                             }
