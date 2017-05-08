@@ -3,7 +3,7 @@ This project is a proof of concept for a new command that will eventually make i
 
 Since this is a proof of concept, expect the syntax and features to change over time.
 
-For an intro/primer into Windows access control, please see this video. It will help you're having trouble following the acronyms below.
+For an intro/primer into Windows access control, please see this [video](https://www.youtube.com/watch?v=G4bptl-H8PU&t=2s). It will help you're having trouble following the acronyms below.
 
 The main goals of Test-Acl are to:
 * **Test for whitelisted access (-AccessAllowed)**
