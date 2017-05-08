@@ -330,7 +330,7 @@ Describe 'Convert ACEs' {
         It 'Invalid string: <string>' -TestCases @{ String = 'Audit Everyone Modify' }, 
             @{ String = 'potato' }, 
             @{ String = 'Allow Everyone Modify What are those?'},
-            @{ String = 'Allow RegistryRights: RegistryRights: FullControl'},
+            @{ String = 'Allow Everyone RegistryRights: RegistryRights: FullControl'},
             @{ String = 'Dney * Write'} -test {
             param([string] $String)        
 
