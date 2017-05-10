@@ -170,25 +170,8 @@ No wildcards are allowed for -RequiredAccess.
         $StartingSddlForm = $SD.GetSddlForm('All')
         foreach ($ReqAce in $RequiredAccess) {
             try {
-                $SD | AddAce $ReqAce -ErrorAction Stop
-                if ($StartingSddlForm -ne $SD.GetSddlForm('All')) {
-                    $FinalResult = $false
-
-                    if (-not $Detailed) {
-                        # Break out of the foreach() loop to save time since -Detailed
-                        # status wasn't requested
-                        break
-                    }
-
-                    # -Detailed must have been specified
-                    Write-Verbose "Adding missing required ACE to list"
-                    $null = $MissingRequiredAces.Add($ReqAce)
-                    $SD = New-Object System.Security.AccessControl.CommonSecurityDescriptor (
-                        $SD.IsContainer,
-                        $SD.IsDS,
-                        $StartingSddlForm
-                    )
-                }
+                Write-Verbose "ReqAce: $($ReqAce | AceToString)"
+                $SD | FindAce $RequiredAccess
             }
             catch {
                 Write-Error $_
@@ -441,9 +424,26 @@ function AddAce {
 
 function FindAce {
 <#
-Helper function that takes a reference ACE and finds any ACEs with overlap for the reference ACE (unless ExactMatch is specified, in which case it finds ACEs that match the reference ACE exactly)
+Helper function that takes a security descriptor and an ACE to search for, and returns matching ACEs from the SD. There are 
+three "modes":
+  * Return matching ACEs with any overlap [default]
+    
+    The original reason for this function was to help search for -DisallowedAccess. For that, any AccessMask/Flags overlap
+    means the test fails, so the ACEs that have any overlap are returned.
 
-NOTE: AccessMask is modified with ToAccessMask (unless -ExactMatch) is specified. This is specifically for the Synchronize FileSystemRight (maybe other rights if they are supposed to have the special treatment the Synchronize right gets).
+  * Return matching ACEs that exactly match the ACE to search for [-ExactMatch]
+
+    Overlap b/w ACEs isn't all that's required. If this switch is specified, ALL ACE properties must match. Useful for testing
+    for -RequiredAccess and -DisallowedAccess when -ExactMatch is specified on Test-Acl.
+
+  * Return matching ACEs that completely include the rights/inheritance flags specified in the ACE to search for. [-RequiredAccess]
+
+    Used for -RequiredAccess. Matching ACEs can provide more access and have more flags set than the $Ace being searched for,
+    but they must contain at least the tested $Ace.
+
+NOTE: The AccessMask is modified with ToAccessMask (unless -ExactMatch is specified). This is specifically for the Synchronize 
+      FileSystemRight (maybe other rights if they are supposed to have the special treatment the Synchronize right gets). This
+      makes it so the comparisons effectively ignore that right.
 #>
 
     [CmdletBinding()]
@@ -452,7 +452,8 @@ NOTE: AccessMask is modified with ToAccessMask (unless -ExactMatch) is specified
         [System.Security.AccessControl.CommonSecurityDescriptor] $SecurityDescriptor,
         [Parameter(Mandatory, Position=0)]
         [System.Security.AccessControl.QualifiedAce] $Ace,
-        [switch] $ExactMatch
+        [switch] $ExactMatch,
+        [switch] $RequiredAccess
     )
 
     process {
@@ -508,9 +509,11 @@ NOTE: AccessMask is modified with ToAccessMask (unless -ExactMatch) is specified
            
            $_.AceQualifier -eq $Ace.AceQualifier -and
            $AppliesToOverlap -gt 0 -and
-           ($ExactMatch -eq $false -or $AppliesToOverlap -eq $AceAppliesTo) -and
+           ($RequiredAccess -eq $false -or $AppliesToOverlap -eq $AceAppliesTo) -and
+           ($ExactMatch -eq $false -or $AppliesTo -eq $AceAppliesTo) -and
            $AccessMaskOverlap -ne 0 -and
-           ($ExactMatch -eq $false -or $AccessMaskOverlap -eq $Ace.AccessMask)
+           ($RequiredAccess -eq $false -or $AccessMaskOverlap -eq $Ace.AccessMask) -and
+           ($ExactMatch -eq $false -or $_.AccessMask -eq $Ace.AccessMask)
         }
 
         $Acl | Where-Object $PrincipalFilter | Where-Object $BigFilter
@@ -684,6 +687,7 @@ function ConvertToSid {
         return $SID
     }
 }
+
 function ConvertToAce {
     [CmdletBinding()]
     param(
@@ -1192,6 +1196,111 @@ Returns an AppliesTo enum from a CommonAce's inheritance and propagation flags. 
     }
 }
 
+function AceToString {
+<#
+Eventually, I'd like to be able to provide an option for formatting, and 
+I'd like for any object flags to show up inside the ACE string instead of 
+at the end, but for now I'm sticking with how the input ACEs are supposed 
+to be formatted.
+#>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory, ValueFromPipeline)]
+        $InputObject,
+        [type] $AccessRightType
+    )
+
+    begin {
+        $AceStringBuilder = New-Object System.Text.StringBuilder
+
+    }
+    process {
+        foreach ($CurrentAce in $InputObject) {
+            
+            $__AccessRightType = if ($PSBoundParameters.ContainsKey('AccessRightType')) {
+                $AccessRightType
+            }
+            elseif ($CurrentAce.__AccessRightType) {
+                $CurrentAce.__AccessRightType
+            }
+            else {
+                $null
+            }
+
+            $null = $AceStringBuilder.Clear()
+            if ($CurrentAce -isnot [System.Security.AccessControl.QualifiedAce]) {
+                try {
+                    $CurrentAce = $CurrentAce | ConvertToAce -ErrorAction Stop
+                }
+                catch {
+                    Write-Error "Unable to convert $($CurrentAce.GetType().Name) object into an ACE"
+                    continue
+                }
+            }
+
+            if ($CurrentAce.AceQualifier -eq [System.Security.AccessControl.AceQualifier]::SystemAudit) {
+                $null = $AceStringBuilder.Append('Audit ')
+                if ($CurrentAce.AuditFlags -band [System.Security.AccessControl.AuditFlags]::Success) {
+                    $null = $AceStringBuilder.Append('S')
+                }
+                if ($CurrentAce.AuditFlags -band [System.Security.AccessControl.AuditFlags]::Failure) {
+                    $null = $AceStringBuilder.Append('F')
+                }
+                $null = $AceStringBuilder.Append(' ')
+            }
+            elseif ($CurrentAce.AceQualifier -eq [System.Security.AccessControl.AceQualifier]::AccessAllowed) {
+                $null = $AceStringBuilder.Append('Allow ')
+            }
+            elseif ($CurrentAce.AceQualifier -eq [System.Security.AccessControl.AceQualifier]::AccessDenied) {
+                $null = $AceStringBuilder.Append('Deny ')
+            }
+            else {
+                Write-Error "Unknown AceQualifier: $($CurrentAce.AceQualifier)"
+                continue
+            }
+
+            $Principal = if ($CurrentAce.__WildcardString) {
+                $CurrentAce.__WildcardString
+            }
+            else {
+                try {
+                    $CurrentAce.SecurityIdentifier.Translate([System.Security.Principal.NTAccount])
+                }
+                catch {
+                    Write-Warning "Error translating '$($CurrentAce.SecurityIdentifier)' to account name: ${_}"
+                    $CurrentAce.SecurityIdentifier
+                }
+            }
+
+            if ($Principal -match '\s|\\') {  # This list of characters that require quoting may be expanded (or we may just want to quote all principals)
+                $Principal = "'${Principal}'"
+            }
+            $null = $AceStringBuilder.Append("${Principal} ")
+        
+            $AccessMaskString = if ($__AccessRightType) {
+                $null = $AceStringBuilder.AppendFormat('{0}: ', $__AccessRightType.Name)
+                ($CurrentAce.AccessMask -as $__AccessRightType) -join ', '
+            }
+            else {
+                $CurrentAce.AccessMask
+            }
+            $null = $AceStringBuilder.Append("${AccessMaskString} ")
+
+            $AppliesTo = $CurrentAce | FlagsToAppliesTo
+            $AppliesToStrings = & {
+                if ($AppliesTo -band [Roe.AppliesTo]::Object) { 'O' }
+                if ($AppliesTo -band [Roe.AppliesTo]::ChildContainers) { 'CC' }
+                if ($AppliesTo -band [Roe.AppliesTo]::ChildObjects) { 'CO' }
+            }
+            $null = $AceStringBuilder.Append($AppliesToStrings -join ', ')
+
+            if ($CurrentAce -is [System.Security.AccessControl.ObjectAce] -and $CurrentAce.ObjectAceFlags -ne [System.Security.AccessControl.ObjectAceFlags]::None) {
+                $null = $AceStringBuilder.AppendFormat(' {0}, {1}', $CurrentAce.ObjectAceType, $CurrentAce.InheritedObjectAceType)
+            }
+            Write-Output $AceStringBuilder.ToString()
+        }
+    }
+}
 Add-Type @'
     using System;
     namespace Roe {

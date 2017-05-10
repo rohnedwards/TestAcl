@@ -1,5 +1,5 @@
 
-$Module = Import-Module $PSScriptRoot\..\TestAcl.psm1 -PassThru
+$Module = Import-Module $PSScriptRoot\..\TestAcl.psm1 -PassThru -Force
 
 InModuleScope $Module.Name {
 Describe 'Convert ACEs' {
@@ -618,14 +618,16 @@ Describe 'Test-Acl' {
             " | Should Be $true
         }
 
-        It 'Figure Out How To Handle Issue With .NET SD (Read Notes in Test)' {
+        It 'RequiredAccess works, even if test ACE and ACL ACE applies to don''t match' {
             $SD | Test-Acl -RequiredAccess "
                 Allow Administrators Modify     # This causes a failure right now b/c AddAccess() adds InheritanceFlags for the ACE that granted Modify to the Object only. I'd ideally like this to work, but I don't want to implement the AddAce() functionality
                 Audit S Everyone Delete
                 Audit F Everyone FullControl
                 Audit F Guests FullControl
             " | Should Be $true
-            
+        }
+        
+        It 'RequiredAccess is able to combine ACEs and take effective rights into account' {
             $SD | Test-Acl -RequiredAccess "
                 Audit SF  Everyone  Delete, DeleteSubdirectoriesAndFiles
             " | Should Be $true   # This is currently failing, but it should work because that's the effective rights
@@ -753,7 +755,7 @@ Describe 'Test-Acl' {
             " | Should Be $true
         }
 
-        It 'Figure Out How To Handle Issue With .NET SD (Read Notes in Test)' {
+        It 'RequiredAccess is able to combine ACEs and take effective rights into account' {
             $SD | Test-Acl -RequiredAccess "
                 Audit SF  Everyone  Delete, DeleteSubdirectoriesAndFiles
             " | Should Be $true   # This is currently failing, but it should work because that's the effective rights
@@ -906,14 +908,16 @@ Describe 'Test-Acl' {
             " -ExactMatch | Should Be $false
         }
 
-        It 'Figure Out How To Handle Issue With .NET SD (Read Notes in Test)' {
+        It 'RequiredAccess works, even if test ACE and ACL ACE applies to don''t match' {
             $SD | Test-Acl -RequiredAccess "
                 Allow Administrators Modify     # This causes a failure right now b/c AddAccess() adds InheritanceFlags for the ACE that granted Modify to the Object only. I'd ideally like this to work, but I don't want to implement the AddAce() functionality
                 Audit S Everyone Delete
                 Audit F Everyone FullControl
                 Audit F Guests FullControl
             " | Should Be $true
-            
+        }
+
+        It 'RequiredAccess is able to combine ACEs and take effective rights into account' {
             $SD | Test-Acl -RequiredAccess "
                 Audit SF  Everyone  Delete, DeleteSubdirectoriesAndFiles
             " | Should Be $true   # This is currently failing, but it should work because that's the effective rights
@@ -984,5 +988,23 @@ Describe 'FindAce' {
         $FoundAces = @($SD | FindAce $Ace -ExactMatch)
         $FoundAces.Count | Should Be 0
     }
+}
+Describe AceToString {
+    It '<string>' -Test {
+        param(
+            [string] $String,
+            [string] $ExpectedString
+        ) 
+
+        $AceObject = $String | ConvertToAce
+        $AceString = $AceObject | AceToString
+        $SecondAceObject = $AceString | ConvertToAce
+
+        if ($ExpectedString) {
+            $AceString | Should Match $ExpectedString
+        }
+        $SecondAceObject | Should Be $AceObject
+    } -TestCases @{ String = 'Users FullControl'},
+        @{ String = 'Deny Administrators Delete'; ExpectedString = 'Deny ''BUILTIN\\Administrators'' FileSystemRights\: (Delete|Synchronize|\,\s)+ O, CC, CO' }
 }
 }
