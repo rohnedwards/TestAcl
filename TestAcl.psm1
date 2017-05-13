@@ -153,25 +153,29 @@ No wildcards are allowed for -RequiredAccess.
         $UnapprovedAccess = New-Object System.Collections.ArrayList
         $PresentDisallowedAces = New-Object System.Collections.ArrayList
 
-        # Process -RequiredAccess first since -AllowedAccess test requires ACLs to
-        # be emptied out completely
-        #
-        # The way this works is that we'll remember the Sddl form, and attempt
-        # to add each -RequiredAccess entry. After adding each ACE, we'll test the
-        # Sddl form again. If the SD already effectively contained that ACE, the
-        # Sddl form should be unchanged. If we detect a change, we know that the
-        # function should exit with a failure.
-        #
-        # Eventually, we can allow a switch that will still walk through the
-        # ACEs, even after a failure is detected. We'd need to reset the SD after
-        # each failure, though. This would be useful for validation, though, so
-        # instead of just getting a 'This failed' message, you could provide more
-        # information about WHY it failed
-        $StartingSddlForm = $SD.GetSddlForm('All')
         foreach ($ReqAce in $RequiredAccess) {
             try {
-                Write-Verbose "ReqAce: $($ReqAce | AceToString)"
-                $SD | FindAce $RequiredAccess
+                # Empty SD:
+                $TempSD = New-Object System.Security.AccessControl.CommonSecurityDescriptor ($SD.IsContainer, $SD.IsDS, 'D:S:')
+                $TempSD | AddAce $ReqAce -ErrorAction Stop
+                
+                foreach ($FoundAce in ($SD | FindAce $ReqAce -ErrorAction Stop)) {
+                    $TempSD | RemoveAce $FoundAce
+                }
+
+                foreach ($AclName in 'DiscretionaryAcl', 'SystemAcl') {
+                    if ($TempSD.$AclName.Count -gt 0) {
+                        $FinalResult = $false
+
+                        $MissingRequiredAces.AddRange($TempSD.$AclName)
+                    }
+                }
+
+                if ($FinalResult -eq $false -and -not $Detailed) {
+                    # Break out of the foreach() loop to save time since -Detailed
+                    # status wasn't requested and we know we failed test.
+                    break
+                }
             }
             catch {
                 Write-Error $_
