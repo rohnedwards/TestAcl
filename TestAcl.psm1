@@ -1240,6 +1240,7 @@ function NewCommonSecurityDescriptor {
         # Tuck the generic rights dictionary inside the SD object (AddAce and RemoveAce will know what to do with it)
         $NewSD | Add-Member -NotePropertyMembers @{
             __GenericRightsDict = $GenericRightsDict
+            __AccessRightType = $AccessRightType
         }
 
         foreach ($Ace in $ReferenceSD.DiscretionaryAcl) {
