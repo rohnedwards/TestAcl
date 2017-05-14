@@ -73,10 +73,7 @@ No wildcards are allowed for -RequiredAccess.
         # is provided, then the security descriptor CANNOT contain any ACEs except what's
         # provided in the -AllowedAccess collection. The collection can contain ACEs that
         # aren't present in the security descriptor, however.
-        [System.Security.AccessControl.QualifiedAce[]] 
-        [Roe.TransformScript({
-            $_ | ConvertToAce -ErrorAction Stop
-        })]
+        [string[]] 
         $AllowedAccess,
         [Parameter()]
         # A list of ACEs that cannot be present in the security descriptor. If -DisallowedAccess
@@ -89,19 +86,13 @@ No wildcards are allowed for -RequiredAccess.
         # against an SD that had an ACE that granted 'Users FullControl CO' and -ExactMatch
         # wasn't specified. If -ExactMatch is specified, however, the Test-Acl call would pass
         # since the two ACEs don't match exactly.
-        [System.Security.AccessControl.QualifiedAce[]]
-        [Roe.TransformScript({
-            $_ | ConvertToAce -ErrorAction Stop
-        })]
+        [string[]]
         $DisallowedAccess,
         [Parameter()]
         # A list of ACEs that MUST be present in the security descriptor. The security
         # descriptor is still allowed to contain ACEs that aren't listed in the
         # -RequiredAccess collection. 
-        [System.Security.AccessControl.QualifiedAce[]] 
-        [Roe.TransformScript({
-            $_ | ConvertToAce -ErrorAction Stop
-        })]
+        [string[]] 
         $RequiredAccess,
         # By default, ACEs aren't required to match the -AllowedAccess or -RequiredAccess
         # exactly, i.e., the AccessMask and/or InheritanceFlags can differ as long as 
@@ -148,12 +139,20 @@ No wildcards are allowed for -RequiredAccess.
             return
         }
 
+        # Convert string access rules into QualifiedAce objects:
+        $CTAParams = @{
+            AccessRightType = $SD.__AccessRightType
+        }
+        $RequiredAccessAces = $RequiredAccess | Where-Object { $_ } | ConvertToAce @CTAParams
+        $DisallowedAccessAces = $DisallowedAccess | Where-Object { $_ } | ConvertToAce @CTAParams
+        $AllowedAccessAces = $AllowedAccess | Where-Object { $_ } | ConvertToAce @CTAParams
+        
         $FinalResult = $true # Assume $true unless we find something bad
         $MissingRequiredAces = New-Object System.Collections.ArrayList
         $UnapprovedAccess = New-Object System.Collections.ArrayList
         $PresentDisallowedAces = New-Object System.Collections.ArrayList
 
-        foreach ($ReqAce in $RequiredAccess) {
+        foreach ($ReqAce in $RequiredAccessAces) {
             try {
                 # Empty SD:
                 $TempSD = New-Object System.Security.AccessControl.CommonSecurityDescriptor ($SD.IsContainer, $SD.IsDS, 'D:S:')
@@ -182,7 +181,7 @@ No wildcards are allowed for -RequiredAccess.
                 return
             }
         }
-        foreach ($DisallowedAce in $DisallowedAccess) {
+        foreach ($DisallowedAce in $DisallowedAccessAces) {
             try {
                 $BadACEs = $SD | FindAce $DisallowedAce | CreateAndedAce $DisallowedAce
                 
@@ -211,7 +210,7 @@ No wildcards are allowed for -RequiredAccess.
         # tell (this would probably be more noticeable on AD objects)
         $AllowedAccessAcesSpecified = $AllowedAuditAcesSpecified = $false
         $DenyAcePresent = $false   # Only used if there are ACEs left after going through all $AllowedAccess
-        foreach ($AllowedAce in $AllowedAccess) {
+        foreach ($AllowedAce in $AllowedAccessAces) {
             Write-Debug "Removing ACE"
             try {
                 $SD | RemoveAce $AllowedAce -ErrorAction Stop
@@ -780,14 +779,16 @@ function ConvertToAce {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory, ValueFromPipeline)]
-        $InputObject
+        $InputObject,
+        # Only used when $InputObject is a string. This hardcodes the ART instead of searching for it.
+        [type] $AccessRightType
     )
 
     process {
 
         [System.Security.AccessControl.AceFlags] $AceFlags = [System.Security.AccessControl.AceFlags]::None   
         $AccessMask = 0
-        $AccessRightType = $ObjectAceType = $InheritedObjectAceType = $AceQualifier = $Sid = $null
+        $ObjectAceType = $InheritedObjectAceType = $AceQualifier = $Sid = $null
         $AceFlagsDefined = $false
 
         switch ($InputObject.GetType()) {
@@ -1373,6 +1374,10 @@ to be formatted.
             else {
                 $CurrentAce.AccessMask
             }
+            if ([string]::IsNullOrEmpty($AccessMaskString)) {
+                Write-Error "Unable to cast access mask ($($CurrentAce.AccessMask)) to type ($($__AccessRightType.FullName))"
+                $AccessMaskString = $CurrentAce.AccessMask
+            }
             $null = $AceStringBuilder.Append("${AccessMaskString} ")
 
             $AppliesTo = $CurrentAce | FlagsToAppliesTo
@@ -1409,44 +1414,6 @@ Add-Type @'
             This = 8,
             O = 8,
             Object = 8
-        }
-    }
-'@
-
-Add-Type @'
-    using System.Collections;    // Needed for IList
-    using System.Management.Automation;
-    using System.Collections.Generic;
-    namespace Roe {
-        public sealed class TransformScriptAttribute : ArgumentTransformationAttribute {
-            string _transformScript;
-            public TransformScriptAttribute(string transformScript) {
-                _transformScript = string.Format(@"
-                    # Assign $_ variable
-                    $_ = $args[0]
- 
-                    # The return value of this needs to match the C# return type so no coercion happens
-                    $FinalResult = New-Object System.Collections.ObjectModel.Collection[psobject]
-                    $ScriptResult = {0}
- 
-                    # Add the result and output the collection
-                    $FinalResult.Add((,$ScriptResult))
-                    $FinalResult", transformScript);
-            }
- 
-            public override object Transform(EngineIntrinsics engineIntrinsics, object inputData) {
-                var results = engineIntrinsics.InvokeCommand.InvokeScript(
-                    _transformScript,
-                    true,   // Run in its own scope
-                    System.Management.Automation.Runspaces.PipelineResultTypes.None,  // Just return as PSObject collection
-                    null,
-                    inputData
-                );
-                if (results.Count > 0) {
-                    return results[0].ImmediateBaseObject;
-                }
-                return inputData;  // No transformation
-            }
         }
     }
 '@

@@ -519,11 +519,6 @@ Describe 'Test-Acl' {
         }
     }
 
-    It 'Works with -RequiredAccess FileSystemAccessRule[]' {
-        $ReqAces = [System.Security.AccessControl.FileSystemAccessRule]::new('SYSTEM', 'Modify', 'ObjectInherit, ContainerInherit', 'InheritOnly', 'Allow'), 
-                    [System.Security.AccessControl.FileSystemAccessRule]::new('Users', 'ReadAndExecute', 'None', 'None', 'Allow')
-        Get-Item C:\Windows | Test-Acl -RequiredAccess $ReqAces | Should Be $true
-    }
 }
 Describe 'Test-Acl' {
 
@@ -652,7 +647,7 @@ Describe 'Test-Acl' {
                 Allow * TakeOwnership O
             " -Detailed
             $Result.DisallowedAces.Count | Should Be 1
-            $Result.DisallowedAces | Should Be ('Allow "NT Service\TrustedInstaller" FullControl O' | ConvertToAce)
+            $Result.DisallowedAces | Should Be ('Allow "NT Service\TrustedInstaller" TakeOwnership O' | ConvertToAce)
         }
 
         It '-AllowedAccess, -DisallowedAccess, -RequiredAccess Can Work Together' {
@@ -779,7 +774,7 @@ Describe 'Test-Acl' {
                 Allow * TakeOwnership O
             " -Detailed
             $Result.DisallowedAces.Count | Should Be 1
-            $Result.DisallowedAces | Should Be ('Allow "NT Service\TrustedInstaller" FullControl O' | ConvertToAce)
+            $Result.DisallowedAces | Should Be ('Allow "NT Service\TrustedInstaller" TakeOwnership O' | ConvertToAce)
         }
 
         It '-AllowedAccess, -DisallowedAccess, -RequiredAccess Can Work Together' {
@@ -911,25 +906,25 @@ Describe 'Test-Acl' {
         It 'RequiredAccess works, even if test ACE and ACL ACE applies to don''t match' {
             $SD | Test-Acl -RequiredAccess "
                 Allow Administrators Modify     # This causes a failure right now b/c AddAccess() adds InheritanceFlags for the ACE that granted Modify to the Object only. I'd ideally like this to work, but I don't want to implement the AddAce() functionality
-                Audit S Everyone Delete
-                Audit F Everyone FullControl
-                Audit F Guests FullControl
+                Audit S Everyone RegistryRights: Delete
+                Audit F Everyone RegistryRights: FullControl
+                Audit F Guests RegistryRights: FullControl
             " | Should Be $true
         }
 
         It 'RequiredAccess is able to combine ACEs and take effective rights into account' {
             $SD | Test-Acl -RequiredAccess "
-                Audit SF  Everyone  Delete, DeleteSubdirectoriesAndFiles
+                Audit SF  Everyone  RegistryRights: Delete
             " | Should Be $true   # This is currently failing, but it should work because that's the effective rights
         }
     
         It '-DisallowedAccess works as expected' {
             $SD | Test-Acl -DisallowedAccess "
-                Everyone Read
+                Everyone ReadKey
             " | Should Be $true
         
             $SD | Test-Acl -DisallowedAccess "
-                Users Read
+                Users ReadKey
             " | Should Be $false
             
             $SD | Test-Acl -DisallowedAccess "
@@ -1006,5 +1001,12 @@ Describe AceToString {
         $SecondAceObject | Should Be $AceObject
     } -TestCases @{ String = 'Users FullControl'},
         @{ String = 'Deny Administrators Delete'; ExpectedString = 'Deny ''BUILTIN\\Administrators'' FileSystemRights\: (Delete|Synchronize|\,\s)+ O, CC, CO' }
+
+    It 'Notifies when unknown accessmask is provided' {
+        'Everyone DeleteSubDirectoriesAndFiles' | ConvertToAce | AceToString -AccessRightType System.Security.AccessControl.RegistryRights -ErrorVariable AceErrors -ErrorAction SilentlyContinue |
+            Should Match 'Allow \''?Everyone\''? RegistryRights\: \d+ '
+    
+        $AceErrors.Count | Should Be 1
+    }
 }
 }
