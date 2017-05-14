@@ -561,7 +561,7 @@ Return: Allow Users Delete                 O
 
     process {
         $CommonAccessMask = $InputAce.AccessMask -band $ReferenceAce.AccessMask
-        $CommonAccessMask = ToAccessMask -AccessMask $CommonAccessMask -Action Remove
+        $CommonAccessMask = ToAccessMask -AccessMask $CommonAccessMask -Action Remove -AccessRightType $ReferenceAce.__AccessRightType
         [ROE.AppliesTo] $CommonAppliesTo = (FlagsToAppliesTo $InputAce).value__ -band (FlagsToAppliesTo $ReferenceAce).value__
         $CommonAuditFlags = $InputAce.AuditFlags.value__ -band $ReferenceAce.AuditFlags.value__
 
