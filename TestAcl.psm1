@@ -184,7 +184,7 @@ No wildcards are allowed for -RequiredAccess.
         }
         foreach ($DisallowedAce in $DisallowedAccess) {
             try {
-                $BadACEs = $SD | FindAce $DisallowedAce
+                $BadACEs = $SD | FindAce $DisallowedAce | CreateAndedAce $DisallowedAce
                 
                 if ($null -ne $BadACEs) {
                     $FinalResult = $false
@@ -267,6 +267,9 @@ No wildcards are allowed for -RequiredAccess.
         if ($Detailed) {
             return [PSCustomObject] @{
                 Result = $FinalResult
+                ExtraAccess = $UnapprovedAccess | AceToString -AccessRightType $SD.__AccessRightType | Out-String | ForEach-Object Trim
+                MissingAccess = $MissingRequiredAces | AceToString -AccessRightType $SD.__AccessRightType | Out-String | ForEach-Object Trim
+                DisallowedAccess = $PresentDisallowedAces | AceToString -AccessRightType $SD.__AccessRightType | Out-String | ForEach-Object Trim
                 ExtraAces = $UnapprovedAccess
                 MissingAces = $MissingRequiredAces
                 DisallowedAces = $PresentDisallowedAces
@@ -524,6 +527,87 @@ NOTE: The AccessMask is modified with ToAccessMask (unless -ExactMatch is specif
         
     }
 }
+function CreateAndedAce {
+<#
+First, terrible name.
+
+Second, this is used to transform an $InputAce so that it only contains
+access that's included in the $ReferenceAce.
+
+For instance, if the $ReferenceAce looks like this:
+Allow Users ReadAndExecute O, CC
+
+And an $InputAce comes across that looks like this:
+Allow Users FullControl O, CC, CO
+
+Then the resulting ACE should be this:
+Allow Users ReadAndExecute O, CC
+
+After writing that out, it seems like this is unecessary (why not just return $ReferenceAce?)
+
+So another example:
+   Ref: Allow Users ReadAndExecute, Delete O
+ Input: Allow Users Write, Delete          O, CC, CO
+Return: Allow Users Delete                 O
+#>
+
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory, ValueFromPipeline)]
+        [System.Security.AccessControl.QualifiedAce] $InputAce,
+        [Parameter(Mandatory, Position=0)]
+        [System.Security.AccessControl.QualifiedAce] $ReferenceAce
+    )
+
+    process {
+        $CommonAccessMask = $InputAce.AccessMask -band $ReferenceAce.AccessMask
+        $CommonAccessMask = ToAccessMask -AccessMask $CommonAccessMask -Action Remove
+        [ROE.AppliesTo] $CommonAppliesTo = (FlagsToAppliesTo $InputAce).value__ -band (FlagsToAppliesTo $ReferenceAce).value__
+        $CommonAuditFlags = $InputAce.AuditFlags.value__ -band $ReferenceAce.AuditFlags.value__
+
+        # This is ripped off from ConvertToAce. Need to refactor so this code isn't duplicated b/w the functions:
+        [System.Security.AccessControl.AceFlags] $AceFlags = [System.Security.AccessControl.AceFlags]::None
+        if ($CommonAppliesTo -band [ROE.AppliesTo]::ChildContainers) {
+            $AceFlags = $AceFlags.value__ -bor [System.Security.AccessControl.AceFlags]::ContainerInherit.value__
+        }
+        if ($CommonAppliesTo -band [ROE.AppliesTo]::ChildObjects) {
+            $AceFlags = $AceFlags.value__ -bor [System.Security.AccessControl.AceFlags]::ObjectInherit.value__
+        }
+    
+        if (-not ($CommonAppliesTo -band [ROE.AppliesTo]::Object)) {
+            $AceFlags = $AceFlags.value__ -bor [System.Security.AccessControl.AceFlags]::InheritOnly.value__
+        }
+
+        if ($CommonAuditFlags -band [System.Security.AccessControl.AuditFlags]::Success) {
+            $AceFlags = $AceFlags.value__ -bor [System.Security.AccessControl.AceFlags]::SuccessfulAccess
+        }
+        if ($CommonAuditFlags -band [System.Security.AccessControl.AuditFlags]::Failure) {
+            $AceFlags = $AceFlags.value__ -bor [System.Security.AccessControl.AceFlags]::FailedAccess
+        }
+
+        $AceType = 'System.Security.AccessControl.CommonAce'
+        $NewAceArgs = New-Object System.Collections.ArrayList
+        $null = $NewAceArgs.AddRange(@(
+            $AceFlags,
+            $InputAce.AceQualifier, # Calling function should have made sure both ACEs match here
+            $CommonAccessMask,
+            $InputAce.SecurityIdentifier,
+            $InputAce.IsCallback,
+            $InputAce.GetOpaque()
+        ))
+        if ($InputAce -is [System.Security.AccessControl.ObjectAce]) {
+            Write-Warning "ObjectAces not fully supported for detailed DisallowedAccess; showing full ACE instead"
+            return $InputAce
+        }
+
+        $ReturnObject = New-Object $AceType $NewAceArgs
+        if ($InputAce.__AccessRightType) {
+            $ReturnObject | Add-Member -NotePropertyName __AccessRightType -NotePropertyValue $InputAce.__AccessRightType
+        }
+        Write-Output $ReturnObject
+    }
+}
+
 function RemoveAce {
 
     [CmdletBinding()]
