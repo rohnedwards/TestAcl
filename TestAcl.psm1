@@ -138,7 +138,7 @@ the missing access that caused the test to fail (NOTE: This behavior will probab
         # We need to know if there are any Audit ACEs being tested for so we know if we need
         # to pass -Audit:$true to NewCommonSecurityDescriptor (if user specifies an SD to
         # function, this doesn't really matter since the -Audit switch wouldn't be used)
-        $AuditRulesSpecified = [bool] (($AllowedAccess, $RequiredAccess).AceQualifier -eq [System.Security.AccessControl.AceQualifier]::SystemAudit)
+        $AuditRulesSpecified = [regex]::Match(($AllowedAccess, $RequiredAccess, $DisallowedAccess | Out-String), '^\s*Audit', 'Multiline').Success
     
         if ($ExactMatch) {
             throw "-ExactMatch isn't implemented yet"
