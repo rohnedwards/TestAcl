@@ -673,7 +673,7 @@ function RemoveAce {
 
         $null = $Arguments.AddRange((
             $Ace.SecurityIdentifier,
-            (ToAccessMask $Ace.AccessMask -GenericRights $GenericRightsDict -AccessRightType $Ace.__AccessRightType -Action Remove -AceQualifier $Ace.AceQualifier),
+            (ToAccessMask $Ace.AccessMask -GenericRights $GenericRightsDict -AccessRightType $Ace.__AccessRightType -Action Add -AceQualifier $Ace.AceQualifier),
             $Ace.InheritanceFlags,
             $Ace.PropagationFlags
         ))
