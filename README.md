@@ -55,20 +55,16 @@ The main goals of Test-Acl are to:
   PS> $Result.Result
   False
 
-  PS> $Result.ExtraAces | ft AceType, SecurityIdentifier, AccessMask, I*Flags, P*Flags
-        AceType SecurityIdentifier AccessMask                InheritanceFlags PropagationFlags
-        ------- ------------------ ----------                ---------------- ----------------
-   AccessDenied S-1-5-32-546          1900918 ContainerInherit, ObjectInherit             None
-  AccessAllowed S-1-5-11                65814 ContainerInherit, ObjectInherit      InheritOnly
-  AccessAllowed S-1-5-11                    4                            None             None
-
+  PS> $Result.ExtraAccess
+        
+  Deny 'BUILTIN\Guests' FileSystemRights: ExecuteFile, DeleteSubdirectoriesAndFiles, Write, Delete, ChangePermissions, TakeOwnership, Synchronize O, CC, CO
+  Allow 'NT AUTHORITY\Authenticated Users' FileSystemRights: Write, Delete CC, CO
+  Allow 'NT AUTHORITY\Authenticated Users' FileSystemRights: AppendData O
   ``` 
 
 * **Test for required access (-RequiredAccess)**
 
   When -RequiredAccess is used, Test-Acl ensures that a DACL or SACL contains the effective rights defined in each rule (if -ExactMatch is used, the EXACT rules must be defined instead of the effective rights).
-  
-  Because of the underlying way this is tested, there are currently some scenarios where this check will give false negatives. This will be fixed in a future update.
   
   This is very useful for testing for Deny and Audit ACEs, but can still be used to test for Allow ACEs.
 
@@ -94,20 +90,27 @@ The main goals of Test-Acl are to:
 
   True
 
-  # This is an example of a false negative. This should pass, but it fails b/c of the 'Deny' ACE's flags
-  PS> Test-Acl .\subfolder -RequiredAccess '
-    Deny Guests Read O
-    Audit F Everyone Delete, DeleteSubdirectoriesAndFiles
-  '
-
-  False
-
   # Finally, a test that we expect to fail:
-  PS> Test-Acl .\subfolder -RequiredAccess '
+  PS> $Result = Test-Acl .\subfolder -RequiredAccess '
     Users Modify
-  ' 
+  ' -Detailed
+
+  PS> $Result.Result
 
   False
+
+  # Notice that it shows we're missing Write, Delete since Users already had ReadAndExecute
+  PS> $Result.MissingAccess
+  
+  Allow 'BUILTIN\Users' FileSystemRights: Write, Delete O, CC, CO
+
+
+  # Let's repeat that last test, except say that we only require Modify on the folder (O)
+  PS> $Result = Test-Acl .\subfolder -RequiredAccess '
+    Users Modify O
+  ' -Detailed | select -ExpandProperty MissingAccess
+
+  Allow 'BUILTIN\Users' FileSystemRights: Write, Delete O
   ```
 
   
@@ -134,14 +137,17 @@ The main goals of Test-Acl are to:
 
   True
   
-  # This fails because CC, CO has ListDirectory
+  # This fails because Authenticated Users has ListDirectory/ReadData for CC, CO
   PS> Test-Acl .\subfolder -DisallowedAccess '
     "Authenticated Users" ListDirectory
-  '
+  ' -Detailed | select Result, DisallowedAccess
 
-  False
+  Result DisallowedAccess                                                          
+  ------ ----------------                                                          
+  False Allow 'NT AUTHORITY\Authenticated Users' FileSystemRights: ReadData CC, CO
+
   
-  # This passes because O doesn't have ListDirectory allowed
+  # This passes because O doesn't have ListDirectory/ReadData allowed for Authenticated Users
   PS> Test-Acl .\subfolder -DisallowedAccess '
     "Authenticated Users" ListDirectory O
   '
