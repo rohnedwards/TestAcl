@@ -291,7 +291,7 @@ Describe 'Convert ACEs' {
         'Audit S "APPLICATION PACKAGE AUTHORITY\ALL APPLICATION PACKAGES" ReadKey' | ConvertToAce | Should Be (([System.Security.AccessControl.RegistryAuditRule]::new(
             'ALL APPLICATION PACKAGES',
             'ReadKey',
-            'ObjectInherit, ContainerInherit',
+            'ContainerInherit',
             'None',
             'Success'
         )) | ConvertToAce)
@@ -647,7 +647,11 @@ Describe 'Test-Acl' {
                 Allow * TakeOwnership O
             " -Detailed
             $Result.DisallowedAces.Count | Should Be 1
-            $Result.DisallowedAces | Should Be ('Allow "NT Service\TrustedInstaller" TakeOwnership O' | ConvertToAce)
+            
+            # Gotta do this weird roundabout test b/c of the Synchronize right, which is added transparently when string is converted
+            # to an ACE, but is missing (by design) from the CommonAce sitting in DisallowedAces. We could check against the DiallowedAccess
+            # string, but that's probably not going to stick around on the result object(s) 
+            $Result.DisallowedAces | AceToString -AccessRightType System.Security.AccessControl.FileSystemRights | ConvertToAce | Should Be ('Allow "NT Service\TrustedInstaller" TakeOwnership O' | ConvertToAce)
         }
 
         It '-AllowedAccess, -DisallowedAccess, -RequiredAccess Can Work Together' {
@@ -731,7 +735,24 @@ Describe 'Test-Acl' {
             }
         }
         It '-RequiredAccess Handles Invalid Flags' {
-            throw "Decide how to handle the situation (see test definition)"
+            <#
+                Files can't have inheritance flags. So what happens if you require that access with a check?
+
+                First, not specifying any AppliesTo information should just work. For now it does b/c we ignore
+                the flags at the AddAce/RemoveAce level when temp SDs are being populated. Might have to eventually
+                change ConvertToAce to be IsContainer/IsDS aware and not depend on AddAce/RemoveAce for this.
+
+                So, what if the access is explicitly required? I feel like the test should fail. If you require CC
+                one a file object, you should just fail the test everytime until you fix the test. This presents
+                a problem with the resulting MissingAces from -Detailed: the temp SD wasn't able to track those
+                flags, so it can't tell you that it's missing CC (it would probably pass unless you intentionally
+                left off the O from the string definition like below).
+
+                Fixing this is going to require a ton of changes, so we'll leave it for another day. For now,
+                the test is going to fail with a throw so we don't accidentally make it start passing at some
+                point...
+            #>
+            throw "See design problem notes in this test"
             $SD | Test-Acl -RequiredAccess "
                 Allow Administrators FullControl CC, CO
             " | Should Be 'Should this be $true b/c this effectively means no ACE, or should it be $false b/c it can''t exist?'
@@ -774,7 +795,11 @@ Describe 'Test-Acl' {
                 Allow * TakeOwnership O
             " -Detailed
             $Result.DisallowedAces.Count | Should Be 1
-            $Result.DisallowedAces | Should Be ('Allow "NT Service\TrustedInstaller" TakeOwnership O' | ConvertToAce)
+
+            # Gotta do this weird roundabout test b/c of the Synchronize right, which is added transparently when string is converted
+            # to an ACE, but is missing (by design) from the CommonAce sitting in DisallowedAces. We could check against the DiallowedAccess
+            # string, but that's probably not going to stick around on the result object(s) 
+            $Result.DisallowedAces | AceToString -AccessRightType System.Security.AccessControl.FileSystemRights | ConvertToAce | Should Be ('Allow "NT Service\TrustedInstaller" TakeOwnership O' | ConvertToAce)
         }
 
         It '-AllowedAccess, -DisallowedAccess, -RequiredAccess Can Work Together' {
@@ -843,7 +868,7 @@ Describe 'Test-Acl' {
                 Deny       Guests       RegistryRights: FullControl    O, CC
                 Audit  S   Everyone     RegistryRights: Delete         O, CC
                 Audit   F  Everyone     RegistryRights: FullControl    O, CC
-                Audit   F  Guests       RegistryRights: FullControl    O, CC
+                Audit   F  Guests       RegistryRights: FullControl    O
             ' | ConvertToAce
             $Result.ExtraAces.Count | Should Be $ExpectedExtraAces.Count
             foreach ($ExtraAce in $Result.ExtraAces) {
@@ -874,7 +899,7 @@ Describe 'Test-Acl' {
             " | Should Be $true
 
             $SD | Test-Acl -RequiredAccess "
-                Allow Administrators RegistryRights: FullControl CC, CO  # CO should be ignored since -ExactMatch isn't specified
+                Allow Administrators RegistryRights: FullControl CC
             " | Should Be $true
 
             $SD | Test-Acl -RequiredAccess "
@@ -887,15 +912,15 @@ Describe 'Test-Acl' {
         }
         It '-RequiredAccess Works With Different Inheritance/PropagationFlags (-ExactMatch specified)' {
             $SD | Test-Acl -RequiredAccess "
-                Deny Guests RegistryRights: FullControl O, CC, CO
+                Deny Guests RegistryRights: FullControl O
             " | Should Be $true
             
             $SD | Test-Acl -RequiredAccess "
-                Deny Guests RegistryRights: FullControl O, CC, CO  # CO matters now
+                Deny Guests RegistryRights: FullControl O, CC
             " -ExactMatch | Should Be $false
 
             $SD | Test-Acl -RequiredAccess "
-                Allow Administrators RegistryRights: FullControl CC, CO
+                Allow Administrators RegistryRights: FullControl CC
             " -ExactMatch | Should Be $false
 
             $SD | Test-Acl -RequiredAccess "
@@ -903,13 +928,17 @@ Describe 'Test-Acl' {
             " -ExactMatch | Should Be $false
         }
 
-        It 'RequiredAccess works, even if test ACE and ACL ACE applies to don''t match' {
-            $SD | Test-Acl -RequiredAccess "
-                Allow Administrators Modify     # This causes a failure right now b/c AddAccess() adds InheritanceFlags for the ACE that granted Modify to the Object only. I'd ideally like this to work, but I don't want to implement the AddAce() functionality
+        It 'RequiredAccess works on RegistryKeys' {
+            $Result = $SD | Test-Acl -RequiredAccess "
+                Allow Administrators FullControl
                 Audit S Everyone RegistryRights: Delete
                 Audit F Everyone RegistryRights: FullControl
                 Audit F Guests RegistryRights: FullControl
-            " | Should Be $true
+            " -Detailed
+
+            $Result.Result | Should Be $false
+            $Result.MissingAces.Count | Should Be 1
+            $Result.MissingAces | Should Be ('Audit F Guests RegistryRights: FullControl CC' | ConvertToAce)
         }
 
         It 'RequiredAccess is able to combine ACEs and take effective rights into account' {

@@ -12,6 +12,15 @@ InModuleScope $Module.Name {
 
             $ConvertedAces.Count | Should Be 2
             $ctaErr.Count | Should Be 1
+
+            $ConvertedAces = '
+                Administrators FileSystemRights: Modify # This is OK, though, because we override at a lower level than the -AccessRightType
+                Administrators RegistryRights: FullControl
+                Users RegistryRights: ReadKey
+            ' | ConvertToAce -AccessRightType System.Security.AccessControl.RegistryRights -ErrorVariable ctaErr -ErrorAction SilentlyContinue
+
+            $ConvertedAces.Count | Should Be 3
+            $ctaErr.Count | Should Be 0
         }
 
         It 'Assigns proper default inheritance flags' {
