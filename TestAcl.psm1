@@ -18,14 +18,22 @@ AllowedAccess
 The -AllowedAccess can be thought of as a whitelist: any access that these ACEs grant are allowed to be present 
 in the SD, even if they don't match exactly. For example, you can specify that an ACE granting Users 'Read, 
 Write' to a folder, subfolders, and files is allowed, but the SD you're testing may only grant Users 'Read' to 
-subfolders. This less-permissive ACE would not cause the test (to fail well, unless the -ExactMatch switch is 
-also specified). If, however, the SD had an ACE granting Users 'Read, Delete', the test would fail because 
-'Delete' isn't contained in the -AllowedAccess.
+subfolders. This less-permissive ACE would not cause the test to fail (unless the -ExactMatch switch is also
+specified). If, however, the SD had an ACE granting Users 'Read, Delete', the test would fail because 'Delete'
+isn't contained in the -AllowedAccess.
 
 The -AllowedAccess string formats can also contain wildcards for principals. This is useful for when you want to
-allow certain rights to be allowed, even when you don't know what principals they may be granted to. For example,
+allow certain rights to exist, even when you don't know what principals they may be granted to. For example,
 maybe you're only looking for objects where users have more than Read access. Specifying the following in the
 -AllowedAccess would take care of that: Allow * Read
+
+If any access is found on the securable object that isn't specified in this list, the test will fail. If the
+-Detailed switch is provided, the access that caused the test to fail will be included in the ExtraAces and
+ExtraAccess properties returned (NOTE: This behavior will probably change in future updates)
+
+By default, 'Deny' and 'Audit' ACEs in the SD will be ignored unless the -AllowedAccess string contains ACEs
+of those types.
+
 
 DisallowedAccess
 --------------
@@ -38,6 +46,10 @@ Allow  Everyone  FullControl
 
 If -DisallowedAccess is passed 'Allow Everyone Read', the test would fail because the read access is contained
 in the SD's actual access.
+
+If the -Detailed switch is provided, the access that caused the test to fail will be returned in the
+DisallowedAces and DisallowedAccess properties returned (NOTE: This behavior will probably change in future
+updates)
 
 
 RequiredAccess
@@ -55,6 +67,9 @@ to the folder, subfolders, and files (since no inheritance/propagation informati
 applying to all)
 
 No wildcards are allowed for -RequiredAccess.
+
+If the test fails and the -Detailed switch is provided, the MissingAces and MissingAccess properties will contain
+the missing access that caused the test to fail (NOTE: This behavior will probably change in future updates).
 
 .NOTES
 
