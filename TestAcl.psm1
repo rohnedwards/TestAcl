@@ -796,7 +796,11 @@ function ConvertToAce {
             ([String]) {
                 $InputObject = $InputObject -split '\s*\n\s*' | Where-Object { $_ }
                 if ($InputObject.Count -gt 1) {
-                    $InputObject | ConvertToAce
+                    $RecallParams = @{}   # PSBoundParameters isn't re-used, so if more params end up getting added, we can try to remove InputObject from it and splat it
+                    if ($PSBoundParameters.ContainsKey('AccessRightType')) {
+                        $RecallParams.AccessRightType = $AccessRightType
+                    }
+                    $InputObject | ConvertToAce @RecallParams
                     return
                 }
                 
