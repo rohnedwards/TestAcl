@@ -265,6 +265,7 @@ No wildcards are allowed for -RequiredAccess.
 
         if ($Detailed) {
             return [PSCustomObject] @{
+                PsPath = $SD.__PsPath
                 Result = $FinalResult
                 ExtraAccess = $UnapprovedAccess | AceToString -AccessRightType $SD.__AccessRightType | Out-String | ForEach-Object Trim
                 MissingAccess = $MissingRequiredAces | AceToString -AccessRightType $SD.__AccessRightType | Out-String | ForEach-Object Trim
@@ -1274,6 +1275,7 @@ function NewCommonSecurityDescriptor {
             $NewSD | AddAce $Ace -ErrorAction Stop
         }
 
+        $NewSD | Add-Member -NotePropertyName __PsPath -NotePropertyValue (Convert-Path $InputObject.PsPath -ErrorAction SilentlyContinue)
         return $NewSD
     }
 }
