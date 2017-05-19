@@ -1010,7 +1010,25 @@ function ConvertToAce {
 
                 # Test to see if any inheritance and propagation flags have been set (remember, they were optional). If not, set them for O CC CO
                 if (-not $AceFlagsDefined) {
-                    $AceFlags = $AceFlags.value__ -bor ([System.Security.AccessControl.AceFlags] 'ObjectInherit, ContainerInherit').value__
+
+                    # Different ARTs have different default inheritance flags. Files actually would just have O, but
+                    # the logic to add/remove ACEs on a file take care of removing the container flags. Registry keys
+                    # and AD objects only have containers for children, so they have no concept of CO.
+                    $DefaultInheritanceFlags = switch ($AccessRightType) {
+                        System.Security.AccessControl.RegistryRights {
+                            [System.Security.AccessControl.AceFlags]::ContainerInherit
+                        }
+                        
+                        System.DirectoryServices.ActiveDirectoryRights {
+                            [System.Security.AccessControl.AceFlags]::ContainerInherit
+                        }
+
+                        default {
+                            [System.Security.AccessControl.AceFlags] 'ObjectInherit, ContainerInherit'
+                        }
+                    }
+                    
+                    $AceFlags = $AceFlags.value__ -bor $DefaultInheritanceFlags.value__
                 }
 
                 # We need at least a principal and access mask, which would put the $LastTokenSection at 3

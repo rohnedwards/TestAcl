@@ -13,5 +13,35 @@ InModuleScope $Module.Name {
             $ConvertedAces.Count | Should Be 2
             $ctaErr.Count | Should Be 1
         }
+
+        It 'Assigns proper default inheritance flags' {
+            $Aces = '
+                Administrators ReadAndExecute
+                Administrators RegistryRights: ReadKey
+                Administrators ActiveDirectoryRights: GenericAll
+            ' | ConvertToAce
+
+            $Aces[0].InheritanceFlags | Should Be 'ContainerInherit, ObjectInherit'
+            $Aces[1..2].InheritanceFlags | Should Be 'ContainerInherit'
+        }
+
+        It 'Allows inheritance flags to be overridden' {
+            $Aces = '
+                Administrators ReadAndExecute O
+                Administrators RegistryRights: ReadKey O
+                Administrators ActiveDirectoryRights: GenericAll O
+            ' | ConvertToAce
+
+            $Aces[0..2].InheritanceFlags | Should Be 'None'
+
+            $Aces = '
+                Administrators ReadAndExecute CC, CO
+                Administrators RegistryRights: ReadKey CC, CO
+                Administrators ActiveDirectoryRights: GenericAll CC, CO
+            ' | ConvertToAce
+
+            $Aces[0..2].InheritanceFlags | Should Be 'ContainerInherit, ObjectInherit'
+            $Aces[0..2].PropagationFlags | Should Be 'InheritOnly'
+        }
     }
 }
