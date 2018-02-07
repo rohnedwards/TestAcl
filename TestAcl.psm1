@@ -1290,7 +1290,14 @@ function NewCommonSecurityDescriptor {
             $NewSD | AddAce $Ace -ErrorAction Stop
         }
 
-        $NewSD | Add-Member -NotePropertyName __PsPath -NotePropertyValue (Convert-Path $InputObject.PsPath -ErrorAction SilentlyContinue)
+        $PsPath = try {
+            Convert-Path $InputObject.PsPath -ErrorAction SilentlyContinue
+        }
+        catch {
+            $null
+        }
+
+        $NewSD | Add-Member -NotePropertyName __PsPath -NotePropertyValue $PsPath
         return $NewSD
     }
 }
