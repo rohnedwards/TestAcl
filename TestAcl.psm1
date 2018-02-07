@@ -514,7 +514,8 @@ NOTE: The AccessMask is modified with ToAccessMask (unless -ExactMatch is specif
         $AceAppliesTo = FlagsToAppliesTo $Ace
         $BigFilter = {
            if ($ExactMatch) {
-                $AccessMaskOverlap = $_.AccessMask -band $Ace.AccessMask
+                $CurrentAccessMask = $_.AccessMask
+                $AceAccessMask = $Ace.AccessMask
            }
            else {
                 # Use ToAccessMask to get rid of the Synchronize right for FileSystemRights ACEs (and any future rights
@@ -523,8 +524,11 @@ NOTE: The AccessMask is modified with ToAccessMask (unless -ExactMatch is specif
                     Action = 'Remove'  # This will remove rights that get automatically added (like FSR 'Synchronize')
                     AccessRightType = $Ace.__AccessRightType  # OK if this is null/undefined
                 }
-                $AccessMaskOverlap = (ToAccessMask $_.AccessMask @TAMParams) -band (ToAccessMask $Ace.AccessMask @TAMParams)
+
+                $AceAccessMask = ToAccessMask $Ace.AccessMask @TAMParams
+                $CurrentAccessMask = ToAccessMask $_.AccessMask @TAMParams
            }
+           $AccessMaskOverlap = $CurrentAccessMask -band $AceAccessMask
 
            $AppliesTo = FlagsToAppliesTo $_
            $AppliesToOverlap = $AppliesTo.value__ -band $AceAppliesTo
@@ -534,8 +538,8 @@ NOTE: The AccessMask is modified with ToAccessMask (unless -ExactMatch is specif
            ($RequiredAccess -eq $false -or $AppliesToOverlap -eq $AceAppliesTo) -and
            ($ExactMatch -eq $false -or $AppliesTo -eq $AceAppliesTo) -and
            $AccessMaskOverlap -ne 0 -and
-           ($RequiredAccess -eq $false -or $AccessMaskOverlap -eq $Ace.AccessMask) -and
-           ($ExactMatch -eq $false -or $_.AccessMask -eq $Ace.AccessMask)
+           ($RequiredAccess -eq $false -or $AccessMaskOverlap -eq $AceAccessMask) -and
+           ($ExactMatch -eq $false -or $CurrentAccessMask -eq $AceAccessMask)
         }
 
         $Acl | Where-Object $PrincipalFilter | Where-Object $BigFilter
