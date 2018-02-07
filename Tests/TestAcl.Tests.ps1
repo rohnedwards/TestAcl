@@ -1063,6 +1063,29 @@ Describe 'FindAce (DS Object SD)' {
     $ObjectSD.SetSecurityDescriptorSddlForm($ObjectSddl)
     $SD = $ObjectSD | NewCommonSecurityDescriptor
 
+    $AceWithObjectType = "Allow 'Authenicated Users' ExtendedRight O, CC edacfd8f-ffb3-11d1-b41d-00a0c968f939, 00000000-0000-0000-0000-000000000000" | ConvertToAce
+    $AceWithObjectTypeAndInheritedObjectType = "Allow 'Authenicated Users' ExtendedRight O, CC edacfd8f-ffb3-11d1-b41d-00a0c968f939, edacfd8f-ffb3-11d1-b41d-00a0c968f939" | ConvertToAce
+    $AceWithNoObjectFlags = "Allow 'Authenicated Users' ExtendedRight O, CC" | ConvertToAce
+
+    It 'Default match works for ACE with ObjectType' {
+        $SD | FindAce $AceWithObjectType | Should Not BeNullOrEmpty
+        $SD | FindAce $AceWithObjectTypeAndInheritedObjectType | Should Not BeNullOrEmpty
+        $SD | FindAce $AceWithNoObjectFlags | Should Not BeNullOrEmpty
+    }
+
+    It 'ExactMatch works as expected for ACE with ObjectType' {
+        $SD | FindAce $AceWithObjectType -ExactMatch | Should Not BeNullOrEmpty
+        $SD | FindAce $AceWithObjectTypeAndInheritedObjectType -ExactMatch | Should BeNullOrEmpty
+        $SD | FindAce $AceWithNoObjectFlags -ExactMatch | Should BeNullOrEmpty
+    }
+
+    It 'RequiredAccess works as expected for ACE with ObjectType' {
+        $SD | FindAce $AceWithObjectType -RequiredAccess | Should Not BeNullOrEmpty
+        $SD | FindAce $AceWithObjectTypeAndInheritedObjectType -RequiredAccess | Should Not BeNullOrEmpty
+        $SD | FindAce $AceWithNoObjectFlags -RequiredAccess | Should BeNullOrEmpty
+    }
+
+
 }
 Describe AceToString {
     It '<string>' -Test {
