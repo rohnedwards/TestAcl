@@ -1012,6 +1012,57 @@ Describe 'FindAce' {
         $FoundAces = @($SD | FindAce $Ace -ExactMatch)
         $FoundAces.Count | Should Be 0
     }
+
+    It 'Works with any overlap in default mode' {
+        $Ace = "Allow Administrators Read, ChangePermissions, TakeOwnership O" | ConvertToAce
+        
+        $FoundAces = @($SD | FindAce $Ace)
+        $FoundAces.Count | Should Be 1
+    }
+
+    It 'Rejects overlap in -RequiredAccess mode' {
+        $Ace = "Allow Administrators Read, ChangePermissions, TakeOwnership O" | ConvertToAce
+        
+        $FoundAces = @($SD | FindAce $Ace -RequiredAccess)
+        $FoundAces.Count | Should Be 0
+    }
+
+    It 'Allows partial match in -RequiredAccess mode' {
+        $Ace = "Allow Administrators Read O" | ConvertToAce
+        
+        $FoundAces = @($SD | FindAce $Ace -RequiredAccess)
+        $FoundAces.Count | Should Be 1
+    }
+
+    It 'Forces exact matches with -ExactMatch' {
+        $Ace = "Allow Administrators Read O" | ConvertToAce
+        
+        $FoundAces = @($SD | FindAce $Ace -ExactMatch)
+        $FoundAces.Count | Should Be 0
+
+        $Ace = "Allow Administrators Modify O" | ConvertToAce
+        
+        $FoundAces = @($SD | FindAce $Ace -ExactMatch)
+        $FoundAces.Count | Should Be 1
+
+        $Ace = "Allow Administrators FullControl CC" | ConvertToAce
+        
+        $FoundAces = @($SD | FindAce $Ace -ExactMatch)
+        $FoundAces.Count | Should Be 0
+
+        $Ace = "Allow Administrators FullControl CC, CO" | ConvertToAce
+        
+        $FoundAces = @($SD | FindAce $Ace -ExactMatch)
+        $FoundAces.Count | Should Be 1
+    }
+}
+Describe 'FindAce (DS Object SD)' {
+
+    $ObjectSddl = 'D:P(A;CI;RPLCLOLORC;;;S-1-5-32-12345)(A;CI;RPWPCCDCLCLOLORCWOWDSDDTSW;;;S-1-5-32-12346)(A;CI;RPWPCCDCLCLOLORCWOWDSDDTSW;;;CO)(A;CI;RPWPCCDCLCLORCWOWDSDDTSW;;;SY)(A;CI;RPLCLORC;;;AU)(OA;CI;CR;edacfd8f-ffb3-11d1-b41d-00a0c968f939;;AU)'
+    $ObjectSD = [System.DirectoryServices.ActiveDirectorySecurity]::new()
+    $ObjectSD.SetSecurityDescriptorSddlForm($ObjectSddl)
+    $SD = $ObjectSD | NewCommonSecurityDescriptor
+
 }
 Describe AceToString {
     It '<string>' -Test {
