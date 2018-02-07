@@ -507,8 +507,12 @@ NOTE: The AccessMask is modified with ToAccessMask (unless -ExactMatch is specif
            { $_.SecurityIdentifier -eq $Ace.SecurityIdentifier }
         }
         
-        if ($Ace -is [System.Security.AccessControl.ObjectAce] -or $SD.IsDS) {
+        $ObjectAceFilter = if ($Ace -is [System.Security.AccessControl.ObjectAce] -or $SD.IsDS) {
             throw "Object ACEs and DS SDs aren't supported yet!"
+        }
+        else {
+            # No filtering
+            { $true }
         }
 
         $AceAppliesTo = FlagsToAppliesTo $Ace
@@ -542,7 +546,7 @@ NOTE: The AccessMask is modified with ToAccessMask (unless -ExactMatch is specif
            ($ExactMatch -eq $false -or $CurrentAccessMask -eq $AceAccessMask)
         }
 
-        $Acl | Where-Object $PrincipalFilter | Where-Object $BigFilter
+        $Acl | Where-Object $PrincipalFilter | Where-Object $BigFilter | Where-Object $ObjectAceFilter
         
     }
 }
