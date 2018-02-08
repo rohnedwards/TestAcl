@@ -1,4 +1,3 @@
-#requires -version 5.0
 
 function Test-Acl {
 <#
@@ -546,6 +545,19 @@ NOTE: The AccessMask is modified with ToAccessMask (unless -ExactMatch is specif
             { $true }
         }
 
+
+        $AuditFlagsFilter = {
+
+            $AuditFlagsOverlap = $_.AuditFlags -band $Ace.AuditFlags
+
+            [System.Security.AccessControl.AuditFlags]::None -eq $_.AuditFlags -or
+            (
+                $AuditFlagsOverlap -gt 0 -and
+                ($RequiredAccess -eq $false -or $AuditFlagsOverlap -eq $Ace.AuditFlags) -and
+                ($ExactMatch -eq $false -or $_.AuditFlags -eq $Ace.AuditFlags)
+            )
+        }
+
         $AceAppliesTo = FlagsToAppliesTo $Ace
         $BigFilter = {
            if ($ExactMatch) {
@@ -577,7 +589,7 @@ NOTE: The AccessMask is modified with ToAccessMask (unless -ExactMatch is specif
            ($ExactMatch -eq $false -or $CurrentAccessMask -eq $AceAccessMask)
         }
 
-        $Acl | Where-Object $PrincipalFilter | Where-Object $BigFilter | Where-Object $ObjectAceFilter
+        $Acl | Where-Object $PrincipalFilter | Where-Object $BigFilter | Where-Object $AuditFlagsFilter | Where-Object $ObjectAceFilter
         
     }
 }
