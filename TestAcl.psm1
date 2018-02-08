@@ -508,7 +508,38 @@ NOTE: The AccessMask is modified with ToAccessMask (unless -ExactMatch is specif
         }
         
         $ObjectAceFilter = if ($Ace -is [System.Security.AccessControl.ObjectAce] -or $SD.IsDS) {
-            throw "Object ACEs and DS SDs aren't supported yet!"
+            # Ace we're searching for might not be an ObjectAce, but the SD could be capable of having
+            # object ACEs, so we need to go through this trouble anyway
+
+            # If the ACE to search for isn't an object ACE, then the object and inherited object types
+            # are treated as if they were just empty GUIDs
+            $MatchingAceObjectType = $MatchingAceInheritedObjectType = [guid]::Empty
+            if ($Ace -is [System.Security.AccessControl.ObjectAce]) {
+                $MatchingAceObjectType = $Ace.ObjectAceType
+                $MatchingAceInheritedObjectType = $Ace.InheritedObjectAceType
+            }
+
+            # This is the filter that's assigned to $ObjectAceFilter
+            {
+                # This filter will be tested after the $BigFilter, which handles access mask and
+                # inheritance flags (without taking InheritedObjectType into account)
+
+                # If the current ACE isn't an object ACE, then the object and inherited object types
+                # are empty GUIDs
+                $CurrentObjectType = $CurrentInheritedObjectType = [guid]::Empty
+                if ($_ -is [System.Security.AccessControl.ObjectAce]) {
+                    $CurrentObjectType = $_.ObjectAceType 
+                    $CurrentInheritedObjectType = $_.InheritedObjectAceType
+                }
+
+                ($ExactMatch -eq $false -or $CurrentObjectType -eq $MatchingAceObjectType) -and   # This one's easy; if -ExactMatch was used, then the GUIDs MUST match perfectly
+                ($ExactMatch -eq $false -or $CurrentInheritedObjectType -eq $MatchingAceInheritedObjectType) -and
+                ($RequiredAccess -eq $false -or $CurrentObjectType -eq [guid]::Empty -or $CurrentObjectType -eq $MatchingAceObjectType) -and  # -RequiredAccess means matching ACE must be fully contained
+                ($RequiredAccess -eq $false -or $CurrentInheritedObjectType -eq [guid]::Empty -or $CurrentInheritedObjectType -eq $MatchingAceInheritedObjectType) -and
+                ([guid]::Empty -in $CurrentObjectType, $MatchingAceObjectType -or $MatchingAceObjectType -eq $CurrentObjectType) -and   # The reverse of the alternate check just above when $RequiredAccess is $true. Without these checks, every ACE would return
+                ([guid]::Empty -in $CurrentInheritedObjectType, $MatchingAceInheritedObjectType -or $MatchingAceInheritedObjectType -eq $CurrentInheritedInheritedObjectType)
+
+            }
         }
         else {
             # No filtering
