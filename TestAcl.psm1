@@ -537,7 +537,7 @@ NOTE: The AccessMask is modified with ToAccessMask (unless -ExactMatch is specif
                 ($RequiredAccess -eq $false -or $CurrentObjectType -eq [guid]::Empty -or $CurrentObjectType -eq $MatchingAceObjectType) -and  # -RequiredAccess means matching ACE must be fully contained
                 ($RequiredAccess -eq $false -or $CurrentInheritedObjectType -eq [guid]::Empty -or $CurrentInheritedObjectType -eq $MatchingAceInheritedObjectType) -and
                 ([guid]::Empty -in $CurrentObjectType, $MatchingAceObjectType -or $MatchingAceObjectType -eq $CurrentObjectType) -and   # The reverse of the alternate check just above when $RequiredAccess is $true. Without these checks, every ACE would return
-                ([guid]::Empty -in $CurrentInheritedObjectType, $MatchingAceInheritedObjectType -or $MatchingAceInheritedObjectType -eq $CurrentInheritedInheritedObjectType)
+                ([guid]::Empty -in $CurrentInheritedObjectType, $MatchingAceInheritedObjectType -or $MatchingAceInheritedObjectType -eq $CurrentInheritedObjectType)
 
             }
         }
