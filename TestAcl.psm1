@@ -221,7 +221,7 @@ the missing access that caused the test to fail (NOTE: This behavior will probab
         }
 
         # Could sort -AllowedAccess based on whether or not they're Wildcard ACEs. It would
-        # be slightly more effecient to wait until normal ACEs have been removed. Time will
+        # be slightly more efficient to wait until normal ACEs have been removed. Time will
         # tell (this would probably be more noticeable on AD objects)
         $AllowedAccessAcesSpecified = $AllowedAuditAcesSpecified = $false
         $DenyAcePresent = $false   # Only used if there are ACEs left after going through all $AllowedAccess
