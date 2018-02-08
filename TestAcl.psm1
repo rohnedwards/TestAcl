@@ -147,6 +147,10 @@ the missing access that caused the test to fail (NOTE: This behavior will probab
     process {
         try {
             $SD = $InputObject | NewCommonSecurityDescriptor -ErrorAction Stop -NoGenericRightsTranslation:$NoGenericRightsTranslation -Audit:$AuditRulesSpecified
+
+            if (-not $SD) {
+                throw "Unable to convert input object to a common security descriptor object. Does current user (${env:username}) have permission to call Get-Acl against this object?$(if($AuditRulesSpecified) { '  NOTE: The function is trying to use the SeSecurityPrivilege, so make sure current user has been granted that right.'} else { '' })"
+            }
         }
         catch {
             Write-Error $_
