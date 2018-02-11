@@ -229,9 +229,10 @@ the missing access that caused the test to fail (NOTE: This behavior will probab
         $AllowedAccessAcesSpecified = $AllowedAuditAcesSpecified = $false
         $DenyAcePresent = $false   # Only used if there are ACEs left after going through all $AllowedAccess
         foreach ($AllowedAce in $AllowedAccessAces) {
-            Write-Debug "Removing ACE"
+            Write-Debug "Current binary length: $($SD.BinaryLength); Removing ACE: $($AllowedAce | AceToString)"
             try {
                 $SD | RemoveAce $AllowedAce -ErrorAction Stop
+                Write-Debug "  New binary length: $($SD.BinaryLength)"
             }
             catch {
                 Write-Error $_
@@ -298,7 +299,7 @@ the missing access that caused the test to fail (NOTE: This behavior will probab
         }
     }
 }
-Export-ModuleMember -Function Test-Acl
+# Export-ModuleMember -Function Test-Acl
 
 $GenericRightsDef = @{
     GenericRead = -2147483648
