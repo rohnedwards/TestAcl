@@ -159,7 +159,7 @@ the missing access that caused the test to fail (NOTE: This behavior will probab
 
         # Convert string access rules into QualifiedAce objects:
         $CTAParams = @{
-            AccessRightType = $SD.__AccessRightType
+            AccessRightType = $SD[0].__AccessRightType
         }
         $RequiredAccessAces = $RequiredAccess | Where-Object { $_ } | ConvertToAce @CTAParams
         $DisallowedAccessAces = $DisallowedAccess | Where-Object { $_ } | ConvertToAce @CTAParams
@@ -173,7 +173,7 @@ the missing access that caused the test to fail (NOTE: This behavior will probab
         foreach ($ReqAce in $RequiredAccessAces) {
             try {
                 # Empty SD:
-                $TempSD = New-Object System.Security.AccessControl.CommonSecurityDescriptor ($SD.IsContainer, $SD.IsDS, 'D:S:')
+                $TempSD = New-Object System.Security.AccessControl.CommonSecurityDescriptor ($SD[0].IsContainer, $SD[0].IsDS, 'D:S:')
                 $TempSD | AddAce $ReqAce -ErrorAction Stop
                 
                 foreach ($FoundAce in ($SD | FindAce $ReqAce -ErrorAction Stop)) {
@@ -229,10 +229,10 @@ the missing access that caused the test to fail (NOTE: This behavior will probab
         $AllowedAccessAcesSpecified = $AllowedAuditAcesSpecified = $false
         $DenyAcePresent = $false   # Only used if there are ACEs left after going through all $AllowedAccess
         foreach ($AllowedAce in $AllowedAccessAces) {
-            Write-Debug "Current binary length: $($SD.BinaryLength); Removing ACE: $($AllowedAce | AceToString)"
+            Write-Debug "Current binary length: $($SD.BinaryLength -join ', '); Removing ACE: $($AllowedAce | AceToString)"
             try {
                 $SD | RemoveAce $AllowedAce -ErrorAction Stop
-                Write-Debug "  New binary length: $($SD.BinaryLength)"
+                Write-Debug "  New binary length: $($SD.BinaryLength -join ', ')"
             }
             catch {
                 Write-Error $_
@@ -259,7 +259,7 @@ the missing access that caused the test to fail (NOTE: This behavior will probab
             }
         }
         
-        if ($AllowedAccessAcesSpecified -and $SD.DiscretionaryAcl.Count -gt 0) {
+        if ($AllowedAccessAcesSpecified -and ($SD.DiscretionaryAcl | Measure-Object).Count -gt 0) {
             Write-Verbose "  -> DACL still contains entries, so there must have been some access not specified in -AllowedAccess present"
             
             $FinalResult = $false
@@ -271,7 +271,7 @@ the missing access that caused the test to fail (NOTE: This behavior will probab
             }
         }
 
-        if ($AllowedAuditAcesSpecified -and $SD.SystemAcl.Count -gt 0) {
+        if ($AllowedAuditAcesSpecified -and ($SD.SystemAcl | Measure-Object).Count -gt 0) {
             Write-Verbose "  -> SACL still contains entries, so there must have been some access not specified in -AllowedAccess present"
             $FinalResult = $false
 
@@ -284,11 +284,11 @@ the missing access that caused the test to fail (NOTE: This behavior will probab
 
         if ($Detailed) {
             return [PSCustomObject] @{
-                PsPath = $SD.__PsPath
+                PsPath = $SD[0].__PsPath
                 Result = $FinalResult
-                ExtraAccess = $UnapprovedAccess | AceToString -AccessRightType $SD.__AccessRightType | Out-String | ForEach-Object Trim
-                MissingAccess = $MissingRequiredAces | AceToString -AccessRightType $SD.__AccessRightType | Out-String | ForEach-Object Trim
-                DisallowedAccess = $PresentDisallowedAces | AceToString -AccessRightType $SD.__AccessRightType | Out-String | ForEach-Object Trim
+                ExtraAccess = $UnapprovedAccess | AceToString -AccessRightType $SD[0].__AccessRightType | Out-String | ForEach-Object Trim
+                MissingAccess = $MissingRequiredAces | AceToString -AccessRightType $SD[0].__AccessRightType | Out-String | ForEach-Object Trim
+                DisallowedAccess = $PresentDisallowedAces | AceToString -AccessRightType $SD[0].__AccessRightType | Out-String | ForEach-Object Trim
                 ExtraAces = $UnapprovedAccess
                 MissingAces = $MissingRequiredAces
                 DisallowedAces = $PresentDisallowedAces
@@ -378,6 +378,41 @@ function ToAccessType {
         default {
             throw "Unsupported AceQualifier: ${_}"
         }
+    }
+}
+
+function AddAceToDict {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory, ValueFromPipeline)]
+        [System.Collections.IDictionary] $SDDict,
+        [Parameter(Mandatory, Position=0)]
+        [System.Security.AccessControl.QualifiedAce] $Ace,
+        [switch] $IsContainer,
+        [switch] $IsDS,
+        [hashtable] $NotePropertyMembers
+    )
+
+    process {
+        $AceFlags = if ($Ace -isnot [System.Security.AccessControl.ObjectAce]) {
+            [System.Security.AccessControl.ObjectAceFlags]::None
+        }
+        else {
+            $Ace.ObjectAceFlags
+        }
+
+        if (-not $SDDict.Contains($AceFlags)){
+            $SDDict[$AceFlags] = New-Object System.Security.AccessControl.CommonSecurityDescriptor $IsContainer, $IsDs, 'D:S:' 
+
+            # Tuck the generic rights dictionary inside the SD object (AddAce and RemoveAce will know what to do with it)
+            $SDDict[$AceFlags] | Add-Member -NotePropertyMembers @{
+                __GenericRightsDict = $GenericRightsDict
+                __AccessRightType = $AccessRightType
+            }
+
+        }
+
+        $SDDict[$AceFlags] | AddAce $Ace -ErrorAction Stop
     }
 }
 
@@ -1330,20 +1365,23 @@ function NewCommonSecurityDescriptor {
 
         # If we've made it here, we have enough information to create a security descriptor
         $ReferenceSD = New-Object System.Security.AccessControl.CommonSecurityDescriptor $IsContainer, $IsDs, $Sddl
-        $NewSD = New-Object System.Security.AccessControl.CommonSecurityDescriptor $IsContainer, $IsDs, 'D:S:'
+        $NewSDDict = @{}
 
-        # Tuck the generic rights dictionary inside the SD object (AddAce and RemoveAce will know what to do with it)
-        $NewSD | Add-Member -NotePropertyMembers @{
-            __GenericRightsDict = $GenericRightsDict
-            __AccessRightType = $AccessRightType
+        $AddAceToDictParams = @{
+            IsContainer = $IsContainer
+            IsDs = $IsDs
+            NotePropertyMembers = @{
+                __GenericRightsDict = $GenericRightsDict
+                __AccessRightType = $AccessRightType
+            }
+            ErrorAction = 'Stop'
         }
-
         foreach ($Ace in $ReferenceSD.DiscretionaryAcl) {
-            $NewSD | AddAce $Ace -ErrorAction Stop
+            $NewSDDict | AddAceToDict $Ace @AddAceToDictParams
         }
 
         foreach ($Ace in $ReferenceSD.SystemAcl) {
-            $NewSD | AddAce $Ace -ErrorAction Stop
+            $NewSDDict | AddAceToDict $Ace @AddAceToDictParams
         }
 
         $PsPath = try {
@@ -1353,8 +1391,8 @@ function NewCommonSecurityDescriptor {
             $null
         }
 
-        $NewSD | Add-Member -NotePropertyName __PsPath -NotePropertyValue $PsPath
-        return $NewSD
+        $NewSDDict.Values | Add-Member -NotePropertyName __PsPath -NotePropertyValue $PsPath
+        return $NewSDDict.Values
     }
 }
 

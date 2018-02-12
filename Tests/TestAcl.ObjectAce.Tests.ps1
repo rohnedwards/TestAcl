@@ -132,11 +132,6 @@ here's what I think's happening:
         $ObjectSD = [System.DirectoryServices.ActiveDirectorySecurity]::new()
         $ObjectSD.SetSecurityDescriptorSddlForm($ObjectSddl)
 
-        $ConvertedObjectSD = $ObjectSD | NewCommonSecurityDescriptor
-        $NewObjectSD = [System.DirectoryServices.ActiveDirectorySecurity]::new()
-        $NewObjectSD.SetSecurityDescriptorSddlForm($ConvertedObjectSD.GetSddlForm('all'))
-
-
         It 'Should find present object ACEs' {
             $ObjectSD | Test-Acl -AllowedAccess "
                 Allow Everyone ReadProperty O, CC 4c164200-20c0-11d0-a768-00aa006e0529, 4828cc14-1437-45bc-9b07-ad6f015e5f28
@@ -149,13 +144,13 @@ here's what I think's happening:
                 Allow Everyone ReadProperty O, CC 59ba2f42-79a2-11d0-9020-00c04fc2d3cf, bf967aba-0de6-11d0-a285-00aa003049e2
                 Allow Everyone ReadProperty O, CC 037088f8-0ae1-11d2-b422-00a0c968f939, 4828cc14-1437-45bc-9b07-ad6f015e5f28
                 Allow Everyone ReadProperty O, CC 037088f8-0ae1-11d2-b422-00a0c968f939, bf967aba-0de6-11d0-a285-00aa003049e2
-            " -Detailed | select -expand ExtraAces | Measure-Object | Select-Object -ExpandProperty Count | Should Be 1
+            " -Detailed | select -expand ExtraAces | Measure-Object | Select-Object -ExpandProperty Count | Should Be 3
             #     Allow Everyone GenericRead O, CC 00000000-0000-0000-0000-000000000000, 4828cc14-1437-45bc-9b07-ad6f015e5f28
             #     Allow Everyone GenericRead O, CC 00000000-0000-0000-0000-000000000000, bf967a9c-0de6-11d0-a285-00aa003049e2
             #     Allow Everyone GenericRead O, CC 00000000-0000-0000-0000-000000000000, bf967aba-0de6-11d0-a285-00aa003049e2
             # " | Should Be $true
 
-            $NewObjectSD | Test-Acl -AllowedAccess "
+            $ObjectSD | Test-Acl -AllowedAccess "
                 Allow Everyone ReadProperty O, CC 4c164200-20c0-11d0-a768-00aa006e0529, 4828cc14-1437-45bc-9b07-ad6f015e5f28
                 Allow Everyone ReadProperty O, CC 4c164200-20c0-11d0-a768-00aa006e0529, bf967aba-0de6-11d0-a285-00aa003049e2
                 Allow Everyone ReadProperty O, CC 5f202010-79a5-11d0-9020-00c04fc2d4cf, 4828cc14-1437-45bc-9b07-ad6f015e5f28
@@ -205,7 +200,7 @@ here's what I think's happening:
                 Allow 'BUILTIN\Guests' ReadProperty CC 4c164200-20c0-11d0-a768-00aa006e0529, 4828cc14-1437-45bc-9b07-ad6f015e5f28
             " -Detailed
 
-            $Result.ExtraAccess.Trim() | Should Be "Allow 'BUILTIN\Guests' ListChildren O, CC"
+            $Result.ExtraAccess.Trim() | Should Be "Allow 'BUILTIN\Guests' ActiveDirectoryRights: ListChildren O, CC"
         }
     }
 }
