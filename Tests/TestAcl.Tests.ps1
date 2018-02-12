@@ -467,7 +467,7 @@ Describe 'Test-Acl' {
             $Result.Result | Should Be $false
             $Result.ExtraAces | Should Be ([System.Security.AccessControl.CommonAce]::new(
                 'ObjectInherit, InheritOnly',
-                'AccessAllowed',
+                [System.Security.AccessControl.AceQualifier]::AccessAllowed,
                 [System.Security.AccessControl.FileSystemRights]::FullControl,
                 'S-1-3-0',
                 $false,
@@ -500,7 +500,8 @@ Describe 'Test-Acl' {
                 'ALL APPLICATION PACKAGES' -1610612736
                 'ALL RESTRICTED APPLICATION PACKAGES' ReadAndExecute, Synchronize
                 'ALL RESTRICTED APPLICATION PACKAGES' -1610612736
-            " -NoGenericRightsTranslation | Should Be $true
+            " -NoGenericRightsTranslation -ErrorAction SilentlyContinue -ErrorVariable TestAclErrors | Should Be $true
+            $TestAclErrors.Count | Should BeGreaterThan 6
         }
         It '-AllowedAccess (GenericRights not translated with -NoGenericRightsTranslation switch; very permissive access masks pass)' {
             $SD | Test-Acl -AllowedAccess "
@@ -515,7 +516,8 @@ Describe 'Test-Acl' {
                 'ALL APPLICATION PACKAGES' -1610612736
                 'ALL RESTRICTED APPLICATION PACKAGES' ReadAndExecute, Synchronize
                 'ALL RESTRICTED APPLICATION PACKAGES' -1610612736
-            " -NoGenericRightsTranslation | Should Be $true
+            " -NoGenericRightsTranslation -ErrorAction SilentlyContinue -ErrorVariable TestAclErrors | Should Be $true
+            $TestAclErrors.Count | Should BeGreaterThan 6
         }
     }
 
